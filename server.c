@@ -50,6 +50,7 @@ static int server_reset_user(struct sigma_dut *dut, const char *user)
 	int fetch_pps = 0;
 	const char *osu_user = NULL;
 	const char *osu_password = NULL;
+	const char *policy = NULL;
 
 	sigma_dut_print(dut, DUT_MSG_DEBUG, "Reset user %s", user);
 
@@ -67,6 +68,7 @@ static int server_reset_user(struct sigma_dut *dut, const char *user)
 		machine_managed = 0;
 	} else if (strcmp(user, "test03") == 0) {
 		/* UpdateInterval-based client trigger for policy update */
+		policy = "ruckus130";
 	} else if (strcmp(user, "test04") == 0) {
 	} else if (strcmp(user, "test05") == 0) {
 	} else if (strcmp(user, "test06") == 0) {
@@ -78,6 +80,7 @@ static int server_reset_user(struct sigma_dut *dut, const char *user)
 		osu_password = "P@ssw0rd";
 	} else if (strcmp(user, "test09") == 0) {
 		/* UpdateInterval-based client trigger for policy update */
+		policy = "ruckus130";
 		osu_user = "testdmacc09";
 		osu_password = "P@ssw0rd";
 	} else if (strcmp(user, "test10") == 0) {
@@ -125,10 +128,73 @@ static int server_reset_user(struct sigma_dut *dut, const char *user)
 		goto fail;
 	}
 
-	sql = sqlite3_mprintf("INSERT OR REPLACE INTO users(identity,realm,methods,password,phase2,machine_managed,remediation,fetch_pps,osu_user,osu_password) VALUES (%Q,%Q,%Q,%Q,%d,%d,%Q,%d,%Q,%Q)",
+	sql = sqlite3_mprintf("INSERT OR REPLACE INTO users(identity,realm,methods,password,phase2,machine_managed,remediation,fetch_pps,osu_user,osu_password,policy) VALUES (%Q,%Q,%Q,%Q,%d,%d,%Q,%d,%Q,%Q,%Q)",
 			      user, realm, methods, password,
 			      phase2, machine_managed, remediation, fetch_pps,
-			      osu_user, osu_password);
+			      osu_user, osu_password, policy);
+
+	if (!sql)
+		goto fail;
+
+	sigma_dut_print(dut, DUT_MSG_DEBUG, "SQL: %s", sql);
+
+	if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+		sigma_dut_print(dut, DUT_MSG_ERROR, "SQL operation failed: %s",
+				sqlite3_errmsg(db));
+	} else {
+		res = 0;
+	}
+
+	sqlite3_free(sql);
+
+fail:
+	sqlite3_close(db);
+
+	return res;
+}
+
+
+static int server_reset_serial(struct sigma_dut *dut, const char *serial)
+{
+	sqlite3 *db;
+	int res = -1;
+	char *sql = NULL;
+	const char *realm = "wi-fi.org";
+	const char *methods = "TLS";
+	int phase2 = 0;
+	int machine_managed = 1;
+	const char *remediation = "";
+	int fetch_pps = 0;
+	const char *osu_user = NULL;
+	const char *osu_password = NULL;
+	const char *policy = NULL;
+	char user[128];
+
+	snprintf(user, sizeof(user), "cert-%s", serial);
+	sigma_dut_print(dut, DUT_MSG_DEBUG, "Reset user %s (serial number: %s)",
+			user, serial);
+
+	if (sqlite3_open(SERVER_DB, &db)) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"Failed to open SQLite database %s",
+				SERVER_DB);
+		return -1;
+	}
+
+	if (strcmp(serial, "1046") == 0) {
+		remediation = "machine";
+	} else if (strcmp(serial, "1047") == 0) {
+		remediation = "user";
+	} else {
+		sigma_dut_print(dut, DUT_MSG_INFO,
+				"Unsupported serial number '%s'", serial);
+		goto fail;
+	}
+
+	sql = sqlite3_mprintf("INSERT OR REPLACE INTO users(identity,realm,methods,phase2,machine_managed,remediation,fetch_pps,osu_user,osu_password,policy) VALUES (%Q,%Q,%Q,%d,%d,%Q,%d,%Q,%Q,%Q)",
+			      user, realm, methods,
+			      phase2, machine_managed, remediation, fetch_pps,
+			      osu_user, osu_password, policy);
 
 	if (!sql)
 		goto fail;
@@ -189,6 +255,43 @@ static int server_reset_cert_enroll(struct sigma_dut *dut, const char *addr)
 }
 
 
+static int server_reset_imsi(struct sigma_dut *dut, const char *imsi)
+{
+	sqlite3 *db;
+	char *sql;
+
+	sigma_dut_print(dut, DUT_MSG_DEBUG, "Reset policy provisioning for %s",
+			imsi);
+
+	if (sqlite3_open(SERVER_DB, &db)) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"Failed to open SQLite database %s",
+				SERVER_DB);
+		return -1;
+	}
+	sql = sqlite3_mprintf("DELETE FROM users WHERE identity=%Q", imsi);
+	if (!sql) {
+		sqlite3_close(db);
+		return -1;
+	}
+	sigma_dut_print(dut, DUT_MSG_DEBUG, "SQL: %s", sql);
+
+	if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"SQL operation failed: %s",
+				sqlite3_errmsg(db));
+		sqlite3_free(sql);
+		sqlite3_close(db);
+		return -1;
+	}
+
+	sqlite3_free(sql);
+	sqlite3_close(db);
+
+	return 0;
+}
+
+
 static int cmd_server_reset_default(struct sigma_dut *dut,
 				    struct sigma_conn *conn,
 				    struct sigma_cmd *cmd)
@@ -218,16 +321,23 @@ static int cmd_server_reset_default(struct sigma_dut *dut,
 	}
 
 	var = get_param(cmd, "SerialNo");
-	if (var) {
-		sigma_dut_print(dut, DUT_MSG_DEBUG, "Reset serial number %s",
-				var);
-		/* TODO */
+	if (var && server_reset_serial(dut, var)) {
+		send_resp(dut, conn, SIGMA_ERROR,
+			  "errorCode,Failed to reset user account to defaults");
+		return 0;
 	}
 
 	var = get_param(cmd, "ClientMACAddr");
 	if (var && server_reset_cert_enroll(dut, var) < 0) {
 		send_resp(dut, conn, SIGMA_ERROR,
 			  "errorCode,Failed to reset cert enroll to defaults");
+		return 0;
+	}
+
+	var = get_param(cmd, "imsi_val");
+	if (var && server_reset_imsi(dut, var) < 0) {
+		send_resp(dut, conn, SIGMA_ERROR,
+			  "errorCode,Failed to reset IMSI/SIM user");
 		return 0;
 	}
 
@@ -480,6 +590,51 @@ static char * get_user_dmacc_field(struct sigma_dut *dut, sqlite3 *db,
 }
 
 
+static int get_eventlog_new_serialno_cb(void *ctx, int argc, char *argv[],
+					char *col[])
+{
+	char **serialno = ctx;
+	char *val;
+
+	if (argc < 1 || !argv[0])
+		return 0;
+
+	val = argv[0];
+	if (strncmp(val, "renamed user to: cert-", 22) != 0)
+		return 0;
+	val += 22;
+	free(*serialno);
+	*serialno = strdup(val);
+
+	return 0;
+}
+
+
+static char * get_eventlog_new_serialno(struct sigma_dut *dut, sqlite3 *db,
+					const char *username)
+{
+	char *sql, *serial = NULL;
+
+	sql = sqlite3_mprintf("SELECT notes FROM eventlog WHERE user=%Q AND notes LIKE %Q",
+			      username, "renamed user to:%");
+	if (!sql)
+		return NULL;
+
+	if (sqlite3_exec(db, sql, get_eventlog_new_serialno_cb, &serial,
+			 NULL) != SQLITE_OK) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"SQL operation to fetch new serialno failed: %s",
+				sqlite3_errmsg(db));
+		sqlite3_free(sql);
+		return NULL;
+	}
+
+	sqlite3_free(sql);
+
+	return serial;
+}
+
+
 static int osu_remediation_status(struct sigma_dut *dut,
 				  struct sigma_conn *conn, int timeout,
 				  const char *username, const char *serialno)
@@ -533,7 +688,25 @@ static int osu_remediation_status(struct sigma_dut *dut,
 		else
 			remediation = get_user_field(dut, db, username,
 						     "remediation");
-		if (remediation && remediation[0] == '\0') {
+		if (!remediation && serialno) {
+			char *new_serial;
+
+			/* Certificate reenrollment through subscription
+			 * remediation - fetch the new serial number */
+			new_serial = get_eventlog_new_serialno(dut, db,
+							       username);
+			if (!new_serial) {
+				/* New SerialNo not known?! */
+				snprintf(resp, sizeof(resp),
+					 "RemediationStatus,Remediation Complete,SerialNo,Unknown");
+				break;
+			}
+			snprintf(resp, sizeof(resp),
+				 "RemediationStatus,Remediation Complete,SerialNo,%s",
+				new_serial);
+			free(new_serial);
+			break;
+		} else if (remediation && remediation[0] == '\0') {
 			snprintf(resp, sizeof(resp),
 				 "RemediationStatus,Remediation Complete");
 			break;
@@ -542,6 +715,130 @@ static int osu_remediation_status(struct sigma_dut *dut,
 
 done:
 	free(remediation);
+	sqlite3_close(db);
+
+	send_resp(dut, conn, SIGMA_COMPLETE, resp);
+	return 0;
+}
+
+
+static int osu_polupd_status(struct sigma_dut *dut,
+			     struct sigma_conn *conn, int timeout,
+			     const char *username, const char *serialno)
+{
+	sqlite3 *db;
+	char *sql;
+	int i;
+	char resp[500];
+	char name[100];
+	char *policy = NULL;
+	int dmacc = 0;
+
+	if (!username && !serialno)
+		return -1;
+	if (!username) {
+		snprintf(name, sizeof(name), "cert-%s", serialno);
+		username = name;
+	}
+
+	if (sqlite3_open(SERVER_DB, &db)) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"Failed to open SQLite database %s",
+				SERVER_DB);
+		return -1;
+	}
+
+	policy = get_user_field(dut, db, username, "policy");
+	if (!policy) {
+		policy = get_user_dmacc_field(dut, db, username, "policy");
+		dmacc = 1;
+	}
+	if (!policy) {
+		snprintf(resp, sizeof(resp),
+			 "PolicyUpdateStatus,User entry not found");
+		goto done;
+	}
+	if (policy[0] == '\0') {
+		snprintf(resp, sizeof(resp),
+			 "PolicyUpdateStatus,User was not configured to need policy update");
+		goto done;
+	}
+
+	sql = sqlite3_mprintf("UPDATE users SET polupd_done=0 WHERE %s=%Q",
+			      (dmacc ? "osu_user" : "identity"),
+			      username);
+	if (!sql) {
+		snprintf(resp, sizeof(resp),
+			 "PolicyUpdateStatus,Internal error");
+		goto done;
+	}
+	sigma_dut_print(dut, DUT_MSG_DEBUG, "SQL: %s", sql);
+	if (sqlite3_exec(db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"SQL operation to fetch user field failed: %s",
+				sqlite3_errmsg(db));
+		sqlite3_free(sql);
+		goto done;
+	}
+	sqlite3_free(sql);
+
+	snprintf(resp, sizeof(resp), "PolicyUpdateStatus,TIMEOUT");
+
+	for (i = 0; i < timeout; i++) {
+		sleep(1);
+		free(policy);
+		if (dmacc)
+			policy = get_user_dmacc_field(dut, db, username,
+						      "polupd_done");
+		else
+			policy = get_user_field(dut, db, username,
+						"polupd_done");
+		if (policy && atoi(policy)) {
+			snprintf(resp, sizeof(resp),
+				 "PolicyUpdateStatus,UpdateComplete");
+			break;
+		}
+	}
+
+done:
+	free(policy);
+	sqlite3_close(db);
+
+	send_resp(dut, conn, SIGMA_COMPLETE, resp);
+	return 0;
+}
+
+
+static int osu_sim_policy_provisioning_status(struct sigma_dut *dut,
+					      struct sigma_conn *conn,
+					      const char *imsi, int timeout)
+{
+	sqlite3 *db;
+	int i;
+	char resp[500];
+	char *id = NULL;
+
+	if (sqlite3_open(SERVER_DB, &db)) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"Failed to open SQLite database %s",
+				SERVER_DB);
+		return -1;
+	}
+
+	snprintf(resp, sizeof(resp), "PolicyProvisioning,TIMEOUT");
+
+	for (i = 0; i < timeout; i++) {
+		free(id);
+		id = get_user_field(dut, db, imsi, "identity");
+		if (id) {
+			snprintf(resp, sizeof(resp),
+				 "PolicyProvisioning,Provisioning Complete");
+			break;
+		}
+		sleep(1);
+	}
+
+	free(id);
 	sqlite3_close(db);
 
 	send_resp(dut, conn, SIGMA_COMPLETE, resp);
@@ -611,6 +908,10 @@ static int cmd_server_request_status(struct sigma_dut *dut,
 		return osu_remediation_status(dut, conn, timeout, username,
 					      serialno);
 
+	if (osu && status && strcasecmp(status, "PolicyUpdate") == 0)
+		return osu_polupd_status(dut, conn, timeout, username,
+					 serialno);
+
 	if (!osu && status && strcasecmp(status, "Authentication") == 0 &&
 	    username)
 		return aaa_auth_status(dut, conn, cmd, username, timeout);
@@ -623,6 +924,11 @@ static int cmd_server_request_status(struct sigma_dut *dut,
 
 	if (osu && status && strcasecmp(status, "OSU") == 0 && addr)
 		return osu_cert_enroll_status(dut, conn, cmd, addr, timeout);
+
+	if (osu && status && strcasecmp(status, "PolicyProvisioning") == 0 &&
+	    imsi)
+		return osu_sim_policy_provisioning_status(dut, conn, imsi,
+							  timeout);
 
 	return 1;
 }
@@ -645,7 +951,7 @@ static int osu_set_cert_reenroll(struct sigma_dut *dut, const char *serial,
 
 	snprintf(id, sizeof(id), "cert-%s", serial);
 	sql = sqlite3_mprintf("UPDATE users SET remediation=%Q WHERE lower(identity)=lower(%Q)",
-			      enable ? "machine" : "", id);
+			      enable ? "reenroll" : "", id);
 	if (!sql)
 		goto fail;
 	sigma_dut_print(dut, DUT_MSG_DEBUG, "SQL: %s", sql);
