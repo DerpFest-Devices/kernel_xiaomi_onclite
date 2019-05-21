@@ -20,8 +20,8 @@ int run_system(struct sigma_dut *dut, const char *cmd)
 	sigma_dut_print(dut, DUT_MSG_DEBUG, "Running '%s'", cmd);
 	res = system(cmd);
 	if (res < 0) {
-		sigma_dut_print(dut, DUT_MSG_DEBUG, "Failed to execute "
-				"command '%s'", cmd);
+		sigma_dut_print(dut, DUT_MSG_INFO,
+				"Failed to execute command '%s'", cmd);
 	}
 	return res;
 }
@@ -45,6 +45,37 @@ int run_system_wrapper(struct sigma_dut *dut, const char *cmd, ...)
 	}
 	va_start(ap, cmd);
 	vsnprintf(buf, bytes_required, cmd, ap);
+	va_end(ap);
+	res = run_system(dut, buf);
+	free(buf);
+	return res;
+}
+
+
+int run_iwpriv(struct sigma_dut *dut, const char *ifname, const char *cmd, ...)
+{
+	va_list ap;
+	char *buf;
+	int bytes_required;
+	int res;
+	size_t prefix_len;
+
+	if (!ifname)
+		return -1;
+	prefix_len = strlen(dut->priv_cmd) + 1 + strlen(ifname) + 1;
+	va_start(ap, cmd);
+	bytes_required = vsnprintf(NULL, 0, cmd, ap);
+	bytes_required += 1;
+	va_end(ap);
+	buf = malloc(prefix_len + bytes_required);
+	if (!buf) {
+		printf("ERROR!! No memory\n");
+		return -1;
+	}
+	snprintf(buf, prefix_len + bytes_required, "%s %s ",
+		 dut->priv_cmd, ifname);
+	va_start(ap, cmd);
+	vsnprintf(buf + prefix_len, bytes_required, cmd, ap);
 	va_end(ap);
 	res = run_system(dut, buf);
 	free(buf);
@@ -1624,10 +1655,17 @@ static int cmd_sta_set_wps_pbc(struct sigma_dut *dut, struct sigma_conn *conn,
 static int cmd_sta_wps_read_pin(struct sigma_dut *dut, struct sigma_conn *conn,
 				struct sigma_cmd *cmd)
 {
-	/* const char *intf = get_param(cmd, "Interface"); */
+	const char *intf = get_param(cmd, "Interface");
 	const char *grpid = get_param(cmd, "GroupID");
-	char *pin = "12345670"; /* TODO: use random PIN */
+	char pin[9], addr[20];
 	char resp[100];
+
+	if (get_wpa_status(intf, "address", addr, sizeof(addr)) < 0 ||
+	    get_wps_pin_from_mac(dut, addr, pin, sizeof(pin)) < 0) {
+		sigma_dut_print(dut, DUT_MSG_DEBUG,
+				"Failed to calculate PIN from MAC, use default");
+		strlcpy(pin, "12345670", sizeof(pin));
+	}
 
 	if (grpid) {
 		char buf[100];
@@ -2012,15 +2050,16 @@ static int cmd_sta_set_opportunistic_ps(struct sigma_dut *dut,
 		return 0;
 	}
 
-	if (wpa_command(grp->ifname, "P2P_SET oppps 1") < 0) {
-		send_resp(dut, conn, SIGMA_ERROR,
-			  "errorCode,Use of OppPS as GO not supported");
-		return 0;
-	}
 	snprintf(buf, sizeof(buf), "P2P_SET ctwindow %d", atoi(ctwindow));
 	if (wpa_command(grp->ifname, buf) < 0) {
 		send_resp(dut, conn, SIGMA_ERROR,
 			  "errorCode,Use of CTWindow as GO not supported");
+		return 0;
+	}
+
+	if (wpa_command(grp->ifname, "P2P_SET oppps 1") < 0) {
+		send_resp(dut, conn, SIGMA_ERROR,
+			  "errorCode,Use of OppPS as GO not supported");
 		return 0;
 	}
 
