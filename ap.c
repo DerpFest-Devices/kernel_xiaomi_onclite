@@ -128,8 +128,9 @@ static int ap_ft_enabled(struct sigma_dut *dut)
 }
 
 
-static int cmd_ap_ca_version(struct sigma_dut *dut, struct sigma_conn *conn,
-			     struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_ca_version(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	send_resp(dut, conn, SIGMA_COMPLETE, "version,1.0");
@@ -457,8 +458,9 @@ static void set_ap_country_code(struct sigma_dut *dut)
 }
 
 
-static int cmd_ap_set_wireless(struct sigma_dut *dut, struct sigma_conn *conn,
-			       struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_wireless(struct sigma_dut *dut,
+						 struct sigma_conn *conn,
+						 struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
@@ -1651,7 +1653,7 @@ static int ath10k_debug_enable_addba_req(struct sigma_dut *dut, int tid,
 	DIR *dir;
 	struct dirent *entry;
 	char buf[128], path[128];
-	int ret = 0;
+	int ret = 0, res;
 
 	dir = opendir(dir_path);
 	if (!dir)
@@ -1664,21 +1666,22 @@ static int ath10k_debug_enable_addba_req(struct sigma_dut *dut, int tid,
 		    strcmp(entry->d_name, "..") == 0)
 			continue;
 
-		snprintf(path, sizeof(path) - 1, "%s/%s",
-			 dir_path, entry->d_name);
-		path[sizeof(path) - 1] = 0;
+		res = snprintf(path, sizeof(path) - 1, "%s/%s",
+			       dir_path, entry->d_name);
+		if (res < 0 || res >= sizeof(path))
+			continue;
 
 		if (strcmp(entry->d_name, sta_mac) == 0) {
-			snprintf(buf, sizeof(buf), "echo 1 > %s/aggr_mode",
-				 path);
-			if (system(buf) != 0) {
+			res = snprintf(buf, sizeof(buf),
+				       "echo 1 > %s/aggr_mode", path);
+			if (res < 0 || res >= sizeof(buf) || system(buf) != 0) {
 				sigma_dut_print(dut, DUT_MSG_ERROR,
 						"Failed to set aggr mode for ath10k");
 			}
 
-			snprintf(buf, sizeof(buf), "echo %d 32 > %s/addba",
-				 tid, path);
-			if (system(buf) != 0) {
+			res = snprintf(buf, sizeof(buf),
+				       "echo %d 32 > %s/addba", tid, path);
+			if (res < 0 || res >= sizeof(buf) || system(buf) != 0) {
 				sigma_dut_print(dut, DUT_MSG_ERROR,
 						"Failed to set addbareq for ath10k");
 			}
@@ -1718,8 +1721,9 @@ static int ath10k_ap_send_addba_req(struct sigma_dut *dut,
 }
 
 
-static int cmd_ap_send_addba_req(struct sigma_dut *dut, struct sigma_conn *conn,
-				 struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_send_addba_req(struct sigma_dut *dut,
+						   struct sigma_conn *conn,
+						   struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
@@ -1759,8 +1763,9 @@ static int cmd_ap_send_addba_req(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_security(struct sigma_dut *dut, struct sigma_conn *conn,
-			       struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_security(struct sigma_dut *dut,
+						 struct sigma_conn *conn,
+						 struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	const char *val;
@@ -2141,8 +2146,9 @@ int sta_cfon_set_wireless(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_radius(struct sigma_dut *dut, struct sigma_conn *conn,
-			     struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_radius(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	const char *val;
@@ -2272,19 +2278,23 @@ static void owrt_ap_add_vap(struct sigma_dut *dut, int id, const char *key,
 			    const char *val)
 {
 	char buf[256];
+	int res;
 
 	if (val == NULL) {
-		snprintf(buf, sizeof(buf),
-			 "uci delete wireless.@wifi-iface[%d].%s", id, key);
-		run_system(dut, buf);
+		res = snprintf(buf, sizeof(buf),
+			       "uci delete wireless.@wifi-iface[%d].%s",
+			       id, key);
+		if (res >= 0 && res < sizeof(buf))
+			run_system(dut, buf);
 		return;
 	}
 
-	snprintf(buf, sizeof(buf), "uci add wireless wifi-iface");
-	run_system(dut, buf);
-	snprintf(buf, sizeof(buf), "uci set wireless.@wifi-iface[%d].%s=%s",
-		 id, key, val);
-	run_system(dut, buf);
+	run_system(dut, "uci add wireless wifi-iface");
+	res = snprintf(buf, sizeof(buf),
+		       "uci set wireless.@wifi-iface[%d].%s=%s",
+		       id, key, val);
+	if (res >= 0 && res < sizeof(buf))
+		run_system(dut, buf);
 	snprintf(buf, sizeof(buf), "uci set wireless.@wifi-iface[%d].%s=%s",
 		 id, "network", "lan");
 	run_system(dut, buf);
@@ -2873,7 +2883,7 @@ static void get_if_name(struct sigma_dut *dut, char *ifname_str,
 static int owrt_ap_config_vap(struct sigma_dut *dut)
 {
 	char buf[256], *temp;
-	int vap_id = 0, vap_count, i, j;
+	int vap_id = 0, vap_count, i, j, res;
 	const char *ifname;
 	char ifname2[50];
 
@@ -2911,9 +2921,15 @@ static int owrt_ap_config_vap(struct sigma_dut *dut)
 
 			if (wlan_tag == 2 && dut->program == PROGRAM_WPA3 &&
 			   (dut->ap_interface_5g || dut->ap_interface_2g)) {
-				snprintf(dut->ap_tag_ssid[wlan_tag - 2],
-					 sizeof(dut->ap_tag_ssid[wlan_tag - 2]),
-					 "%s-owe", dut->ap_ssid);
+				res = snprintf(
+					dut->ap_tag_ssid[wlan_tag - 2],
+					sizeof(dut->ap_tag_ssid[wlan_tag - 2]),
+					"%s-owe", dut->ap_ssid);
+				if (res < 0 ||
+				    res >= sizeof(dut->ap_tag_ssid[wlan_tag -
+								   2]))
+					dut->ap_tag_ssid[wlan_tag - 2][0] =
+						'\0';
 			}
 
 			if (dut->ap_tag_ssid[j][0] == '\0')
@@ -3898,8 +3914,9 @@ static void cmd_owrt_ap_hs2_reset(struct sigma_dut *dut)
 }
 
 
-static int cmd_ap_reboot(struct sigma_dut *dut, struct sigma_conn *conn,
-			 struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_reboot(struct sigma_dut *dut,
+					   struct sigma_conn *conn,
+					   struct sigma_cmd *cmd)
 {
 	switch (get_driver_type()) {
 	case DRIVER_ATHEROS:
@@ -3947,7 +3964,7 @@ static int kill_process(struct sigma_dut *dut, char *proc_name,
 	FILE *fp;
 	char *pid, *temp;
 	char *saveptr;
-	int ret = -1;
+	int ret = -1, res;
 
 	if (dir == NULL)
 		return ret;
@@ -3956,7 +3973,9 @@ static int kill_process(struct sigma_dut *dut, char *proc_name,
 		if (dp->d_type != DT_DIR)
 			continue;
 
-		snprintf(buf, sizeof(buf), "%s%s", direc, dp->d_name);
+		res = snprintf(buf, sizeof(buf), "%s%s", direc, dp->d_name);
+		if (res < 0 || res >= sizeof(buf))
+			continue;
 		dir_in = opendir(buf);
 		if (dir_in == NULL)
 			continue;
@@ -3964,7 +3983,10 @@ static int kill_process(struct sigma_dut *dut, char *proc_name,
 		closedir(dir_in);
 		if (dp_in == NULL)
 			continue;
-		snprintf(buf, sizeof(buf), "%s%s/stat", direc, dp->d_name);
+		res = snprintf(buf, sizeof(buf), "%s%s/stat",
+			       direc, dp->d_name);
+		if (res < 0 || res >= sizeof(buf))
+			continue;
 		fp = fopen(buf, "r");
 		if (fp == NULL)
 			continue;
@@ -5830,6 +5852,7 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 	char buf[100];
 	struct stat s;
 	const char *ifname = dut->ap_is_dual ? "ath1" : "ath0";
+	int res;
 
 	if (stat("/proc/athversion", &s) == 0) {
 		sigma_dut_print(dut, DUT_MSG_INFO, "Run apdown");
@@ -5877,8 +5900,10 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 		/* TODO: SAE configuration */
 		run_system(dut, "cfg -a AP_SECMODE=WPA");
 		run_system(dut, "cfg -a AP_SECFILE=PSK");
-		snprintf(buf, sizeof(buf), "cfg -a 'PSK_KEY=%s'",
-			 dut->ap_passphrase);
+		res = snprintf(buf, sizeof(buf), "cfg -a 'PSK_KEY=%s'",
+			       dut->ap_passphrase);
+		if (res < 0 || res >= sizeof(buf))
+			return ERROR_SEND_STATUS;
 		run_system(dut, buf);
 		if (dut->ap_cipher == AP_CCMP_TKIP)
 			run_system(dut, "cfg -a AP_CYPHER=\"CCMP TKIP\"");
@@ -5910,8 +5935,10 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 		snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_PORT=%d",
 			 dut->ap_radius_port);
 		run_system(dut, buf);
-		snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_SECRET=%s",
-			 dut->ap_radius_password);
+		res = snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_SECRET=%s",
+			       dut->ap_radius_password);
+		if (res < 0 || res >= sizeof(buf))
+			return ERROR_SEND_STATUS;
 		run_system(dut, buf);
 		break;
 	case AP_WPA2_EAP_OSEN:
@@ -5981,8 +6008,11 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 			/* TODO: SAE configuration */
 			run_system(dut, "cfg -a AP_SECMODE_2=WPA");
 			run_system(dut, "cfg -a AP_SECFILE_2=PSK");
-			snprintf(buf, sizeof(buf), "cfg -a 'PSK_KEY_2=%s'",
-				 dut->ap_passphrase);
+			res = snprintf(buf, sizeof(buf),
+				       "cfg -a 'PSK_KEY_2=%s'",
+				       dut->ap_passphrase);
+			if (res < 0 || res >= sizeof(buf))
+				return ERROR_SEND_STATUS;
 			run_system(dut, buf);
 			if (dut->ap_cipher == AP_CCMP_TKIP)
 				run_system(dut, "cfg -a AP_CYPHER_2=\"CCMP TKIP\"");
@@ -6015,8 +6045,11 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 			snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_PORT_2=%d",
 				 dut->ap_radius_port);
 			run_system(dut, buf);
-			snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_SECRET_2=%s",
-				 dut->ap_radius_password);
+			res = snprintf(buf, sizeof(buf),
+				       "cfg -a AP_AUTH_SECRET_2=%s",
+				       dut->ap_radius_password);
+			if (res < 0 || res >= sizeof(buf))
+				return ERROR_SEND_STATUS;
 			run_system(dut, buf);
 			break;
 		case AP_WPA2_EAP_OSEN:
@@ -6153,16 +6186,25 @@ static int cmd_ath_ap_config_commit(struct sigma_dut *dut,
 			run_system(dut, "cfg -a AP_SECMODE_2=WPA");
 			run_system(dut, "cfg -a AP_SECFILE_2=OSEN");
 
-			snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_SERVER_2=%s",
-				 dut->ap2_radius_ipaddr);
+			res = snprintf(buf, sizeof(buf),
+				       "cfg -a AP_AUTH_SERVER_2=%s",
+				       dut->ap2_radius_ipaddr);
+			if (res < 0 || res >= sizeof(buf))
+				return ERROR_SEND_STATUS;
 			run_system(dut, buf);
 
-			snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_PORT_2=%d",
-				 dut->ap2_radius_port);
+			res = snprintf(buf, sizeof(buf),
+				       "cfg -a AP_AUTH_PORT_2=%d",
+				       dut->ap2_radius_port);
+			if (res < 0 || res >= sizeof(buf))
+				return ERROR_SEND_STATUS;
 			run_system(dut, buf);
 
-			snprintf(buf, sizeof(buf), "cfg -a AP_AUTH_SECRET_2=%s",
-				 dut->ap2_radius_password);
+			res = snprintf(buf, sizeof(buf),
+				       "cfg -a AP_AUTH_SECRET_2=%s",
+				       dut->ap2_radius_password);
+			if (res < 0 || res >= sizeof(buf))
+				return ERROR_SEND_STATUS;
 			run_system(dut, buf);
 		} else {
 			run_system(dut, "cfg -a AP_SECMODE_2=None");
@@ -6480,8 +6522,9 @@ static int ap_set_force_mcs(struct sigma_dut *dut, int force, int mcs)
 }
 
 
-int cmd_ap_config_commit(struct sigma_dut *dut, struct sigma_conn *conn,
-			 struct sigma_cmd *cmd)
+enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
+					   struct sigma_conn *conn,
+					   struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	FILE *f;
@@ -6707,6 +6750,7 @@ int cmd_ap_config_commit(struct sigma_dut *dut, struct sigma_conn *conn,
 		else if (dut->ap_passphrase[0])
 			fprintf(f, "wpa_passphrase=%s\n", dut->ap_passphrase);
 		if (dut->ap_akm_values & ((1 << AKM_WPA_EAP) |
+					  (1 << AKM_FT_EAP) |
 					  (1 << AKM_EAP_SHA256) |
 					  (1 << AKM_SUITE_B) |
 					  (1 << AKM_FT_SUITE_B) |
@@ -6924,6 +6968,9 @@ skip_key_mgmt:
 
 	if (dut->ap_rsn_preauth)
 		fprintf(f, "rsn_preauth=1\n");
+
+	if (dut->ap_pmksa && dut->ap_pmksa_caching)
+		fprintf(f, "disable_pmksa_caching=1\n");
 
 	switch (dut->ap_pmf) {
 	case AP_PMF_DISABLED:
@@ -7599,8 +7646,9 @@ static int parse_qos_params(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_apqos(struct sigma_dut *dut, struct sigma_conn *conn,
-			    struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_apqos(struct sigma_dut *dut,
+					      struct sigma_conn *conn,
+					      struct sigma_cmd *cmd)
 {
 	/* TXOP: The values provided here for VHT5G only */
 	if (!parse_qos_params(dut, conn, &dut->ap_qos[AP_AC_VO],
@@ -7633,8 +7681,9 @@ static int cmd_ap_set_apqos(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_staqos(struct sigma_dut *dut, struct sigma_conn *conn,
-			     struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_staqos(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd)
 {
 	if (!parse_qos_params(dut, conn, &dut->ap_sta_qos[AP_AC_VO],
 			      get_param(cmd, "cwmin_VO"),
@@ -7748,8 +7797,9 @@ static void ath_reset_vht_defaults(struct sigma_dut *dut)
 }
 
 
-static int cmd_ap_reset_default(struct sigma_dut *dut, struct sigma_conn *conn,
-				struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_reset_default(struct sigma_dut *dut,
+						  struct sigma_conn *conn,
+						  struct sigma_cmd *cmd)
 {
 	const char *type, *program;
 	enum driver_type drv;
@@ -8037,14 +8087,15 @@ static int cmd_ap_reset_default(struct sigma_dut *dut, struct sigma_conn *conn,
 		dut->ap_akm = 0;
 		dut->ap_add_sha256 = 0;
 		dut->ap_add_sha384 = 0;
-		dut->ap_pmksa = 0;
-		dut->ap_pmksa_caching = 0;
 		dut->ap_80plus80 = 0;
 	}
 
 	dut->ap_he_ppdu = PPDU_NOT_SET;
 
 	dut->ap_oper_chn = 0;
+
+	dut->ap_pmksa = 0;
+	dut->ap_pmksa_caching = 0;
 
 	free(dut->rsne_override);
 	dut->rsne_override = NULL;
@@ -8163,14 +8214,16 @@ int sta_cfon_reset_default(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_get_info(struct sigma_dut *dut, struct sigma_conn *conn,
-			   struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_get_info(struct sigma_dut *dut,
+					     struct sigma_conn *conn,
+					     struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	struct stat s;
 	char resp[200];
 	FILE *f;
 	enum driver_type drv = get_driver_type();
+	int res;
 
 	switch (drv) {
 	case DRIVER_ATHEROS: {
@@ -8200,15 +8253,17 @@ static int cmd_ap_get_info(struct sigma_dut *dut, struct sigma_conn *conn,
 			version = "Unknown";
 
 		if (if_nametoindex("ath1") > 0)
-			snprintf(resp, sizeof(resp), "interface,ath0_24G "
-				 "ath1_5G,agent,1.0,version,%s/drv:%s",
-				 version, athver);
+			res = snprintf(resp, sizeof(resp),
+				       "interface,ath0_24G ath1_5G,agent,1.0,version,%s/drv:%s",
+				       version, athver);
 		else
-			snprintf(resp, sizeof(resp), "interface,ath0_24G,"
-				 "agent,1.0,version,%s/drv:%s",
-				 version, athver);
-
-		send_resp(dut, conn, SIGMA_COMPLETE, resp);
+			res = snprintf(resp, sizeof(resp),
+				       "interface,ath0_24G,agent,1.0,version,%s/drv:%s",
+				       version, athver);
+		if (res < 0 || res >= sizeof(resp))
+			send_resp(dut, conn, SIGMA_ERROR, NULL);
+		else
+			send_resp(dut, conn, SIGMA_COMPLETE, resp);
 		return 0;
 	}
 	case DRIVER_LINUX_WCN:
@@ -8283,8 +8338,9 @@ static int cmd_ap_get_info(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_deauth_sta(struct sigma_dut *dut, struct sigma_conn *conn,
-			   struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_deauth_sta(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
@@ -9071,8 +9127,9 @@ static int ap_send_frame_60g(struct sigma_dut *dut,
 }
 
 
-int cmd_ap_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
-		      struct sigma_cmd *cmd)
+enum sigma_cmd_result cmd_ap_send_frame(struct sigma_dut *dut,
+					struct sigma_conn *conn,
+					struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
@@ -9163,9 +9220,9 @@ int cmd_ap_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_get_mac_address(struct sigma_dut *dut,
-				  struct sigma_conn *conn,
-				  struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_get_mac_address(struct sigma_dut *dut,
+						    struct sigma_conn *conn,
+						    struct sigma_cmd *cmd)
 {
 #if defined( __linux__)
 	/* const char *name = get_param(cmd, "NAME"); */
@@ -9246,8 +9303,9 @@ int sta_cfon_get_mac_address(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_pmf(struct sigma_dut *dut, struct sigma_conn *conn,
-			  struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_pmf(struct sigma_dut *dut,
+					    struct sigma_conn *conn,
+					    struct sigma_cmd *cmd)
 {
 	/*
 	 * Ignore the command since the parameters are already handled through
@@ -9258,8 +9316,9 @@ static int cmd_ap_set_pmf(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_set_hs2(struct sigma_dut *dut, struct sigma_conn *conn,
-			  struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
+					    struct sigma_conn *conn,
+					    struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
@@ -9857,8 +9916,9 @@ static int ap_nfc_wps_connection_handover(struct sigma_dut *dut,
 }
 
 
-static int cmd_ap_nfc_action(struct sigma_dut *dut, struct sigma_conn *conn,
-			     struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_nfc_action(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "Name"); */
 	/* const char *intf = get_param(cmd, "Interface"); */
@@ -9881,8 +9941,9 @@ static int cmd_ap_nfc_action(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_wps_read_pin(struct sigma_dut *dut, struct sigma_conn *conn,
-			       struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_wps_read_pin(struct sigma_dut *dut,
+						 struct sigma_conn *conn,
+						 struct sigma_cmd *cmd)
 {
 	char *pin = "12345670"; /* TODO: use random PIN */
 	char resp[100];
@@ -9894,8 +9955,9 @@ static int cmd_ap_wps_read_pin(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_wps_enter_pin(struct sigma_dut *dut, struct sigma_conn *conn,
-				struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_wps_enter_pin(struct sigma_dut *dut,
+						  struct sigma_conn *conn,
+						  struct sigma_cmd *cmd)
 {
 	const char *pin = get_param(cmd, "PIN");
 	char wps_pin[11];
@@ -9916,8 +9978,9 @@ static int cmd_ap_wps_enter_pin(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_wps_set_pbc(struct sigma_dut *dut, struct sigma_conn *conn,
-			      struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_wps_set_pbc(struct sigma_dut *dut,
+						struct sigma_conn *conn,
+						struct sigma_cmd *cmd)
 {
 	sigma_dut_print(dut, DUT_MSG_DEBUG,
 			"Selecting the push button configuration method");
@@ -9965,8 +10028,9 @@ int ap_wps_registration(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_ap_get_parameter(struct sigma_dut *dut, struct sigma_conn *conn,
-				struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_get_parameter(struct sigma_dut *dut,
+						  struct sigma_conn *conn,
+						  struct sigma_cmd *cmd)
 {
 	char value[256], resp[512];
 	const char *param = get_param(cmd, "parameter");
@@ -10182,8 +10246,8 @@ void novap_reset(struct sigma_dut *dut, const char *ifname)
 }
 
 
-struct mbo_pref_ap * mbo_find_nebor_ap_entry(struct sigma_dut *dut,
-					     const uint8_t *mac_addr)
+static struct mbo_pref_ap * mbo_find_nebor_ap_entry(struct sigma_dut *dut,
+						    const uint8_t *mac_addr)
 {
 	int i;
 
@@ -10439,6 +10503,7 @@ static int mac80211_vht_chnum_band(struct sigma_dut *dut, const char *ifname,
 		channel_freq;
 	char buf[100];
 	char *saveptr;
+	int res;
 
 	/* Extract the channel info */
 	token = strdup(val);
@@ -10463,10 +10528,10 @@ static int mac80211_vht_chnum_band(struct sigma_dut *dut, const char *ifname,
 	channel_freq = get_5g_channel_freq(channel);
 
 	/* Issue the channel switch command */
-	snprintf(buf, sizeof(buf),
-		 " -i %s chan_switch 10 %d sec_channel_offset=1 center_freq1=%d bandwidth=%d blocktx vht",
-		 ifname, channel_freq, center_freq, chwidth);
-	if (run_hostapd_cli(dut,buf) != 0) {
+	res = snprintf(buf, sizeof(buf),
+		       " -i %s chan_switch 10 %d sec_channel_offset=1 center_freq1=%d bandwidth=%d blocktx vht",
+		       ifname, channel_freq, center_freq, chwidth);
+	if (res < 0 || res >= sizeof(buf) || run_hostapd_cli(dut, buf) != 0) {
 		sigma_dut_print(dut, DUT_MSG_ERROR,
 				"hostapd_cli chan_switch failed");
 	}
@@ -10518,8 +10583,9 @@ static int wil6210_ap_set_rfeature(struct sigma_dut *dut,
 #endif /* __linux__ */
 
 
-static int cmd_ap_set_rfeature(struct sigma_dut *dut, struct sigma_conn *conn,
-			       struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_ap_set_rfeature(struct sigma_dut *dut,
+						 struct sigma_conn *conn,
+						 struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	/* const char *type = get_param(cmd, "Type"); */
@@ -10553,17 +10619,18 @@ static int cmd_ap_set_rfeature(struct sigma_dut *dut, struct sigma_conn *conn,
 }
 
 
-static int cmd_accesspoint(struct sigma_dut *dut, struct sigma_conn *conn,
-			   struct sigma_cmd *cmd)
+static enum sigma_cmd_result cmd_accesspoint(struct sigma_dut *dut,
+					     struct sigma_conn *conn,
+					     struct sigma_cmd *cmd)
 {
 	/* const char *name = get_param(cmd, "NAME"); */
 	return 1;
 }
 
 
-static int cmd_ap_preset_testparameters(struct sigma_dut *dut,
-					struct sigma_conn *conn,
-					struct sigma_cmd *cmd)
+static enum sigma_cmd_result
+cmd_ap_preset_testparameters(struct sigma_dut *dut, struct sigma_conn *conn,
+			     struct sigma_cmd *cmd)
 {
 	const char *val;
 

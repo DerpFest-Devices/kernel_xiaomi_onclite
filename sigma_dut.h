@@ -41,6 +41,9 @@
 #include "qca-vendor_copy.h"
 #include "nl80211_copy.h"
 #endif /* NL80211_SUPPORT */
+#ifdef ANDROID_WIFI_HAL
+#include "wifi_hal.h"
+#endif /*ANDROID_WIFI_HAL*/
 
 
 #ifdef __GNUC__
@@ -70,6 +73,8 @@
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof((x)) / (sizeof(((x)[0]))))
 #endif
+
+#define IPV6_ADDR_LEN 16
 
 struct sigma_dut;
 
@@ -807,12 +812,16 @@ struct sigma_dut {
 	const char *vendor_name; /* device_get_info vendor override */
 	const char *model_name; /* device_get_info model override */
 	const char *version_name; /* device_get_info version override */
+	const char *log_file_dir; /* Directory to generate log file */
+	FILE *log_file_fd; /* Pointer to log file */
 
 	int ndp_enable; /* Flag which is set once the NDP is setup */
 
 	int ndpe; /* Flag indicating NDPE is supported */
 	u16 trans_port; /* transport port number for TCP/UDP connection */
 	u8 trans_proto; /* transport protocol, 0x06: TCP, 0x11: UDP */
+	u8 nan_ipv6_addr[IPV6_ADDR_LEN]; /* NAN IPv6 address */
+	u8 nan_ipv6_len; /* NAN IPv6 address length */
 
 	/* Length of nan_pmk in octets */
 	u8 nan_pmk_len;
@@ -832,6 +841,9 @@ struct sigma_dut {
 
 	char *sae_commit_override;
 	char *rsne_override;
+	int sta_associate_wait_connect;
+	char server_cert_hash[65];
+	int sta_tod_policy;
 	const char *hostapd_bin;
 	int use_hostapd_pid_file;
 	const char *hostapd_ifname;
@@ -856,6 +868,14 @@ struct sigma_dut {
 #endif /* ANDROID */
 
 	const char *priv_cmd; /* iwpriv / cfg80211tool command name */
+
+	unsigned int wpa_log_size;
+	char dev_start_test_runtime_id[100];
+#ifdef ANDROID_WIFI_HAL
+	wifi_interface_handle wifi_hal_iface_handle;
+	wifi_handle wifi_hal_handle;
+	bool wifi_hal_initialized;
+#endif /*ANDROID_WIFI_HAL*/
 };
 
 
@@ -889,14 +909,17 @@ int sigma_dut_reg_cmd(const char *cmd,
 
 void sigma_dut_register_cmds(void);
 
-int cmd_sta_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
-		       struct sigma_cmd *cmd);
+enum sigma_cmd_result cmd_sta_send_frame(struct sigma_dut *dut,
+					 struct sigma_conn *conn,
+					 struct sigma_cmd *cmd);
 int cmd_sta_set_parameter(struct sigma_dut *dut, struct sigma_conn *conn,
 			  struct sigma_cmd *cmd);
-int cmd_ap_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
-		      struct sigma_cmd *cmd);
-int cmd_wlantest_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
-			    struct sigma_cmd *cmd);
+enum sigma_cmd_result cmd_ap_send_frame(struct sigma_dut *dut,
+					struct sigma_conn *conn,
+					struct sigma_cmd *cmd);
+enum sigma_cmd_result cmd_wlantest_send_frame(struct sigma_dut *dut,
+					      struct sigma_conn *conn,
+					      struct sigma_cmd *cmd);
 int sta_cfon_set_wireless(struct sigma_dut *dut, struct sigma_conn *conn,
 			  struct sigma_cmd *cmd);
 int sta_cfon_get_mac_address(struct sigma_dut *dut, struct sigma_conn *conn,
@@ -942,22 +965,30 @@ int is_ip_addr(const char *str);
 int run_system(struct sigma_dut *dut, const char *cmd);
 int run_system_wrapper(struct sigma_dut *dut, const char *cmd, ...);
 int run_iwpriv(struct sigma_dut *dut, const char *ifname, const char *cmd, ...);
-int cmd_wlantest_set_channel(struct sigma_dut *dut, struct sigma_conn *conn,
-			     struct sigma_cmd *cmd);
+enum sigma_cmd_result cmd_wlantest_set_channel(struct sigma_dut *dut,
+					       struct sigma_conn *conn,
+					       struct sigma_cmd *cmd);
+void wlantest_register_cmds(void);
 void sniffer_close(struct sigma_dut *dut);
 
+/* sigma_dut.c */
+int wifi_hal_initialize(struct sigma_dut *dut);
+
 /* ap.c */
+void ap_register_cmds(void);
 void ath_disable_txbf(struct sigma_dut *dut, const char *intf);
 void ath_config_dyn_bw_sig(struct sigma_dut *dut, const char *ifname,
 			   const char *val);
 void novap_reset(struct sigma_dut *dut, const char *ifname);
 int get_hwaddr(const char *ifname, unsigned char *hwaddr);
-int cmd_ap_config_commit(struct sigma_dut *dut, struct sigma_conn *conn,
-			 struct sigma_cmd *cmd);
+enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
+					   struct sigma_conn *conn,
+					   struct sigma_cmd *cmd);
 int ap_wps_registration(struct sigma_dut *dut, struct sigma_conn *conn,
 			struct sigma_cmd *cmd);
 
 /* sta.c */
+void sta_register_cmds(void);
 int set_ps(const char *intf, struct sigma_dut *dut, int enabled);
 void ath_set_zero_crc(struct sigma_dut *dut, const char *val);
 void ath_set_cts_width(struct sigma_dut *dut, const char *ifname,
@@ -981,6 +1012,7 @@ int sta_extract_60g_ese(struct sigma_dut *dut, struct sigma_cmd *cmd,
 int wil6210_set_force_mcs(struct sigma_dut *dut, int force, int mcs);
 
 /* p2p.c */
+void p2p_register_cmds(void);
 int p2p_cmd_sta_get_parameter(struct sigma_dut *dut, struct sigma_conn *conn,
 			      struct sigma_cmd *cmd);
 void p2p_create_event_thread(struct sigma_dut *dut);
@@ -989,8 +1021,12 @@ void start_dhcp(struct sigma_dut *dut, const char *group_ifname, int go);
 void stop_dhcp(struct sigma_dut *dut, const char *group_ifname, int go);
 int p2p_discover_peer(struct sigma_dut *dut, const char *ifname,
 		      const char *peer, int full);
+enum sigma_cmd_result cmd_sta_p2p_reset(struct sigma_dut *dut,
+					struct sigma_conn *conn,
+					struct sigma_cmd *cmd);
 
 /* basic.c */
+void basic_register_cmds(void);
 void get_ver(const char *cmd, char *buf, size_t buflen);
 
 /* utils.c */
@@ -1050,6 +1086,8 @@ int loc_cmd_sta_send_frame(struct sigma_dut *dut, struct sigma_conn *conn,
 int loc_cmd_sta_preset_testparameters(struct sigma_dut *dut,
 				      struct sigma_conn *conn,
 				      struct sigma_cmd *cmd);
+int lowi_cmd_sta_reset_default(struct sigma_dut *dut, struct sigma_conn *conn,
+			       struct sigma_cmd *cmd);
 
 /* dpp.c */
 int dpp_dev_exec_action(struct sigma_dut *dut, struct sigma_conn *conn,
@@ -1070,5 +1108,14 @@ int send_and_recv_msgs(struct sigma_dut *dut, struct nl80211_ctx *ctx,
 		       int (*valid_handler)(struct nl_msg *, void *),
 		       void *valid_data);
 #endif /* NL80211_SUPPORT */
+
+void traffic_register_cmds(void);
+void traffic_agent_register_cmds(void);
+void powerswitch_register_cmds(void);
+void atheros_register_cmds(void);
+void dev_register_cmds(void);
+void sniffer_register_cmds(void);
+void server_register_cmds(void);
+void miracast_register_cmds(void);
 
 #endif /* SIGMA_DUT_H */

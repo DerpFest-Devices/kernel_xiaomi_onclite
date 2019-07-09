@@ -47,6 +47,45 @@ int sigma_periodic_data = 0;
 #ifdef ANDROID
 #include <android/log.h>
 
+#ifdef ANDROID_WIFI_HAL
+
+static void * wifi_hal_event_thread(void *ptr)
+{
+	struct sigma_dut *dut = ptr;
+
+	wifi_event_loop(dut->wifi_hal_handle);
+	pthread_exit(0);
+
+	return NULL;
+}
+
+
+int wifi_hal_initialize(struct sigma_dut *dut)
+{
+	pthread_t thread1;
+	wifi_error err;
+
+	if (dut->wifi_hal_initialized)
+		return 0;
+
+	err = wifi_initialize(&dut->wifi_hal_handle);
+	if (err) {
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"wifi hal initialize failed");
+		return -1;
+	}
+
+	dut->wifi_hal_iface_handle = wifi_get_iface_handle(dut->wifi_hal_handle,
+							   (char *) "wlan0");
+	pthread_create(&thread1, NULL, &wifi_hal_event_thread, (void *) dut);
+	dut->wifi_hal_initialized = true;
+
+	return 0;
+}
+
+#endif /* ANDROID_WIFI_HAL */
+
+
 static enum android_LogPriority level_to_android_priority(int level)
 {
 	switch (level) {
@@ -60,6 +99,7 @@ static enum android_LogPriority level_to_android_priority(int level)
 		return ANDROID_LOG_VERBOSE;
 	}
 }
+
 #endif /* ANDROID */
 
 
@@ -71,6 +111,7 @@ void sigma_dut_print(struct sigma_dut *dut, int level, const char *fmt, ...)
 	if (level < dut->debug_level)
 		return;
 
+	gettimeofday(&tv, NULL);
 #ifdef ANDROID
 	va_start(ap, fmt);
 	__android_log_vprint(level_to_android_priority(level),
@@ -78,10 +119,18 @@ void sigma_dut_print(struct sigma_dut *dut, int level, const char *fmt, ...)
 	va_end(ap);
 	if (!dut->stdout_debug)
 		return;
+#else /* ANDROID */
+	if (dut->log_file_fd) {
+		va_start(ap, fmt);
+		fprintf(dut->log_file_fd, "%ld.%06u: ",
+			(long) tv.tv_sec, (unsigned int) tv.tv_usec);
+		vfprintf(dut->log_file_fd, fmt, ap);
+		fprintf(dut->log_file_fd, "\n");
+		va_end(ap);
+	}
 #endif /* ANDROID */
 
 	va_start(ap, fmt);
-	gettimeofday(&tv, NULL);
 	printf("%ld.%06u: ", (long) tv.tv_sec,
 	       (unsigned int) tv.tv_usec);
 	vprintf(fmt, ap);
@@ -846,11 +895,12 @@ int main(int argc, char *argv[])
 	sigma_dut.sta_nss = 2; /* Make default nss 2 */
 	sigma_dut.trans_proto = NAN_TRANSPORT_PROTOCOL_DEFAULT;
 	sigma_dut.trans_port = NAN_TRANSPORT_PORT_DEFAULT;
+	sigma_dut.nan_ipv6_len = 0;
 	set_defaults(&sigma_dut);
 
 	for (;;) {
 		c = getopt(argc, argv,
-			   "aAb:Bc:C:dDE:e:fF:gGhH:j:J:i:Ik:l:L:m:M:nN:o:O:p:P:qQr:R:s:S:tT:uv:VWw:x:y:z:");
+			   "aAb:Bc:C:dDE:e:fF:gGhH:j:J:i:Ik:K:l:L:m:M:nN:o:O:p:P:qQr:R:s:S:tT:uv:VWw:x:y:z:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -983,6 +1033,9 @@ int main(int argc, char *argv[])
 		case 'O':
 			sigma_dut.version_name = optarg;
 			break;
+		case 'K':
+			sigma_dut.log_file_dir = optarg;
+			break;
 		case 'S':
 			sigma_station_ifname = optarg;
 			break;
@@ -1064,6 +1117,7 @@ int main(int argc, char *argv[])
 			       "\\\n"
 			       "       [-i <IP address of the AP>] \\\n"
 			       "       [-k <subnet mask for the AP>] \\\n"
+			       "       [-K <sigma_dut log file directory>] \\\n"
 			       "       [-e <hostapd entropy file>] \\\n"
 			       "       [-N <device_get_info vendor>] \\\n"
 			       "       [-o <device_get_info model>] \\\n"
@@ -1174,6 +1228,8 @@ int main(int argc, char *argv[])
 	free(sigma_dut.ap_sae_groups);
 	free(sigma_dut.dpp_peer_uri);
 	free(sigma_dut.ap_sae_passwords);
+	if (sigma_dut.log_file_fd)
+		fclose(sigma_dut.log_file_fd);
 #ifdef NL80211_SUPPORT
 	nl80211_deinit(&sigma_dut, sigma_dut.nl_ctx);
 #endif /* NL80211_SUPPORT */
