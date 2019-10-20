@@ -135,10 +135,16 @@ static int dpp_get_local_bootstrap(struct sigma_dut *dut,
 			       "DPP_BOOTSTRAP_GEN type=qrcode curve=%s chan=%s mac=%s",
 			       curve, resp, mac);
 	} else {
+		int channel = 11;
+
 		/* Default channel list (normal DUT case) */
+		if (sigma_dut_is_ap(dut) && dut->hostapd_running &&
+		    dut->ap_oper_chn &&
+		    dut->ap_channel > 0 && dut->ap_channel <= 13)
+			channel = dut->ap_channel;
 		res = snprintf(buf, sizeof(buf),
-			       "DPP_BOOTSTRAP_GEN type=qrcode curve=%s chan=81/11 mac=%s",
-			       curve, mac);
+			       "DPP_BOOTSTRAP_GEN type=qrcode curve=%s chan=81/%d mac=%s",
+			       curve, channel, mac);
 	}
 
 	if (res < 0 || res >= sizeof(buf) ||
@@ -870,7 +876,8 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 	const char *val;
 	const char *conf_role;
 	int conf_index = -1;
-	char buf[2000];
+	char buf[2000], *pos;
+	char buf2[200];
 	char conf_ssid[100];
 	char conf_pass[100];
 	char pkex_identifier[200];
@@ -900,11 +907,14 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 	};
 	const char *group_id_str = NULL;
 	char group_id[100];
+	char conf2[300];
 	const char *result;
 	int check_mutual = 0;
 	int enrollee_ap;
 	int force_gas_fragm = 0;
 	int not_dpp_akm = 0;
+	int akm_use_selector = 0;
+	int conn_status;
 
 	if (!wait_conn)
 		wait_conn = "no";
@@ -1039,9 +1049,13 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 				dut->default_timeout);
 	}
 
+	val = get_param(cmd, "DPPStatusQuery");
+	conn_status = val && strcasecmp(val, "Yes") == 0;
+
 	conf_ssid[0] = '\0';
 	conf_pass[0] = '\0';
 	group_id[0] = '\0';
+	conf2[0] = '\0';
 	val = get_param(cmd, "DPPConfIndex");
 	if (val)
 		conf_index = atoi(val);
@@ -1141,6 +1155,7 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 		force_gas_fragm = 1;
 		break;
 	case 8:
+	case 9:
 		ascii2hexstr("DPPNET01", buf);
 		res = snprintf(conf_ssid, sizeof(conf_ssid), "ssid=%s", buf);
 		if (res < 0 || res >= sizeof(conf_ssid))
@@ -1155,6 +1170,26 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 			conf_role = "sta-dpp+psk+sae";
 		}
 		group_id_str = "DPPGROUP_DPP_INFRA1";
+		if (conf_index == 9)
+			akm_use_selector = 1;
+		break;
+	case 10:
+		ascii2hexstr("DPPNET01", buf);
+		res = snprintf(conf_ssid, sizeof(conf_ssid), "ssid=%s", buf);
+		if (res < 0 || res >= sizeof(conf_ssid))
+			goto err;
+		if (enrollee_ap)
+			conf_role = "ap-dpp";
+		else
+			conf_role = "sta-dpp";
+		group_id_str = "DPPGROUP_DPP_INFRA1";
+		ascii2hexstr("DPPNET02", buf);
+		ascii2hexstr("This_is_legacy_password", buf2);
+		res = snprintf(conf2, sizeof(conf2),
+			       " @CONF-OBJ-SEP@ conf=%s-dpp+psk+sae ssid=%s pass=%s group_id=DPPGROUP_DPP_INFRA2",
+			       enrollee_ap ? "ap" : "sta", buf, buf2);
+		if (res < 0 || res >= sizeof(conf2))
+			goto err;
 		break;
 	default:
 		send_resp(dut, conn, SIGMA_ERROR,
@@ -1293,10 +1328,13 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 				goto out;
 			}
 			snprintf(buf, sizeof(buf),
-				 "DPP_AUTH_INIT peer=%d%s role=%s conf=%s %s %s configurator=%d%s%s",
+				 "DPP_AUTH_INIT peer=%d%s role=%s conf=%s %s %s configurator=%d%s%s%s%s%s",
 				 dpp_peer_bootstrap, own_txt, role,
 				 conf_role, conf_ssid, conf_pass,
-				 dut->dpp_conf_id, neg_freq, group_id);
+				 dut->dpp_conf_id, neg_freq, group_id,
+				 akm_use_selector ? " akm_use_selector=1" : "",
+				 conn_status ? " conn_status=1" : "",
+				 conf2);
 		} else if (strcasecmp(bs, "QR") == 0) {
 			snprintf(buf, sizeof(buf),
 				 "DPP_AUTH_INIT peer=%d%s role=%s%s%s",
@@ -1333,6 +1371,10 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 		const char *delay_qr_resp;
 		int mutual;
 		int freq = 2462; /* default: channel 11 */
+
+		if (sigma_dut_is_ap(dut) && dut->hostapd_running &&
+		    dut->ap_oper_chn)
+			freq = channel_to_freq(dut, dut->ap_channel);
 
 		if (strcasecmp(bs, "PKEX") == 0) {
 			/* default: channel 6 for PKEX */
@@ -1372,9 +1414,12 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 				goto out;
 			}
 			snprintf(buf, sizeof(buf),
-				 "SET dpp_configurator_params  conf=%s %s %s configurator=%d%s",
+				 "SET dpp_configurator_params  conf=%s %s %s configurator=%d%s%s%s%s",
 				 conf_role, conf_ssid, conf_pass,
-				 dut->dpp_conf_id, group_id);
+				 dut->dpp_conf_id, group_id,
+				 akm_use_selector ? " akm_use_selector=1" : "",
+				 conn_status ? " conn_status=1" : "",
+				 conf2);
 			if (wpa_command(ifname, buf) < 0) {
 				send_resp(dut, conn, SIGMA_ERROR,
 					  "errorCode,Failed to set configurator parameters");
@@ -1727,6 +1772,29 @@ static int dpp_automatic_dpp(struct sigma_dut *dut,
 	    !strstr(buf, "DPP-CONF-RECEIVED")) {
 		send_resp(dut, conn, SIGMA_COMPLETE,
 			  "BootstrapResult,OK,AuthResult,OK,ConfResult,FAILED");
+		goto out;
+	}
+
+	if (conn_status && strstr(buf, "DPP-CONF-SENT") &&
+	    strstr(buf, "wait_conn_status=1")) {
+		res = get_wpa_cli_event(dut, ctrl, "DPP-CONN-STATUS-RESULT",
+					buf, sizeof(buf));
+		if (res < 0) {
+			send_resp(dut, conn, SIGMA_COMPLETE,
+				  "BootstrapResult,OK,AuthResult,OK,ConfResult,OK,StatusResult,Timeout");
+		} else {
+			pos = strstr(buf, "result=");
+			if (!pos) {
+				send_resp(dut, conn, SIGMA_ERROR,
+					  "errorCode,Status result value not reported");
+			} else {
+				pos += 7;
+				snprintf(buf, sizeof(buf),
+					 "BootstrapResult,OK,AuthResult,OK,ConfResult,OK,StatusResult,%d",
+					 atoi(pos));
+				send_resp(dut, conn, SIGMA_COMPLETE, buf);
+			}
+		}
 		goto out;
 	}
 
