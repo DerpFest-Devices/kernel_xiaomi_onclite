@@ -142,6 +142,7 @@ static int sdcardfs_unlink(struct inode *dir, struct dentry *dentry)
 	}
 
 	/* save current_cred and override it */
+	/* save current_cred and override it */
 	saved_cred = override_fsids(SDCARDFS_SB(dir->i_sb),
 						SDCARDFS_I(dir)->data);
 	if (!saved_cred)

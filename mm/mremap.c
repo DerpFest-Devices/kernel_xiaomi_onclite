@@ -155,14 +155,17 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 		 * If we are remapping a valid PTE, make sure
 		 * to flush TLB before we drop the PTL for the
 		 * PTE.
-		 *
+         *
 		 * NOTE! Both old and new PTL matter: the old one
-		 * for racing with page_mkclean(), the new one to
-		 * make sure the physical page stays valid until
-		 * the TLB entry for the old mapping has been
-		 * flushed.
-		 */
-		if (pte_present(pte))
+         * for racing with page_mkclean(), the new one to
+         * make sure the physical page stays valid until
+         * the TLB entry for the ald th page_mkclean(), the new one to
+         * +         * make sure the physical page stays valid until
+         * +         * the TLB entry for the old mapping has been
+         * +         * flushed.mapping has been
+         * flushed.
+         */
+        	if (pte_present(pte))
 			force_flush = true;
 		pte = move_pte(pte, new_vma->vm_page_prot, old_addr, new_addr);
 		pte = move_soft_dirty_pte(pte);
@@ -170,8 +173,8 @@ static void move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
 	}
 
 	arch_leave_lazy_mmu_mode();
-	if (force_flush)
-		flush_tlb_range(vma, old_end - len, old_end);
+    if (force_flush)
+        flush_tlb_range(vma, old_end - len, old_end);
 	if (new_ptl != old_ptl)
 		spin_unlock(new_ptl);
 	pte_unmap(new_pte - 1);
@@ -219,7 +222,7 @@ unsigned long move_page_tables(struct vm_area_struct *vma,
 				if (need_rmap_locks)
 					take_rmap_locks(vma);
 				moved = move_huge_pmd(vma, old_addr, new_addr,
-						    old_end, old_pmd, new_pmd);
+                            old_end, old_pmd, new_pmd);
 				if (need_rmap_locks)
 					drop_rmap_locks(vma);
 				if (moved)

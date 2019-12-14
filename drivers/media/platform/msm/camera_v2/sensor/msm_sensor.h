@@ -90,6 +90,7 @@ struct msm_sensor_ctrl_t {
 	uint8_t is_csid_tg_mode;
 	uint32_t is_secure;
 	uint8_t bypass_video_node_creation;
+	uint8_t vendor_id_need_read;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void *argp);
@@ -101,6 +102,8 @@ int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl);
 int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl);
 
 int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl);
+
+int msm_sensor_match_vendor_id(struct msm_sensor_ctrl_t *s_ctrl);
 
 int msm_sensor_update_cfg(struct msm_sensor_ctrl_t *s_ctrl);
 
