@@ -687,6 +687,7 @@ struct sigma_dut {
 	unsigned int he_mcsnssmap;
 	int he_ul_mcs;
 	int he_mmss;
+	int he_srctrl_allow;
 
 	enum value_not_set_enabled_disabled ap_oce;
 	enum value_not_set_enabled_disabled ap_filsdscv;
@@ -704,6 +705,7 @@ struct sigma_dut {
 	enum value_not_set_enabled_disabled ap_mbssid;
 	enum value_not_set_enabled_disabled ap_twtresp;
 	enum value_not_set_enabled_disabled he_sounding;
+	enum value_not_set_enabled_disabled he_set_sta_1x1;
 
 	enum ppdu {
 		PPDU_NOT_SET,
@@ -890,6 +892,7 @@ struct sigma_dut {
 
 	char *sae_commit_override;
 	char *rsne_override;
+	char *rsnxe_override_eapol;
 	int sta_associate_wait_connect;
 	char server_cert_hash[65];
 	int server_cert_tod;

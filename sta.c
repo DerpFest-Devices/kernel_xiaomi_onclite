@@ -2151,7 +2151,7 @@ static enum sigma_cmd_result cmd_sta_set_psk(struct sigma_dut *dut,
 
 	val = get_param(cmd, "ECGroupID");
 	if (val) {
-		snprintf(buf, sizeof(buf), "SET sae_groups %u", atoi(val));
+		snprintf(buf, sizeof(buf), "SET sae_groups %s", val);
 		if (wpa_command(ifname, buf) != 0) {
 			sigma_dut_print(dut, DUT_MSG_ERROR,
 					"Failed to clear sae_groups");
@@ -2172,11 +2172,45 @@ static enum sigma_cmd_result cmd_sta_set_psk(struct sigma_dut *dut,
 		wpa_command(intf, buf);
 	}
 
+	val = get_param(cmd, "IgnoreH2E_RSNXE_BSSMemSel");
+	if (val) {
+		snprintf(buf, sizeof(buf), "SET ignore_sae_h2e_only %d",
+			 get_enable_disable(val));
+		wpa_command(intf, buf);
+	}
+
+	val = get_param(cmd, "ECGroupID_RGE");
+	if (val) {
+		snprintf(buf, sizeof(buf), "SET extra_sae_rejected_groups %s",
+			 val);
+		wpa_command(intf, buf);
+	}
+
+	val = get_param(cmd, "RSNXE_Content");
+	if (val) {
+		const char *param;
+
+		if (strncasecmp(val, "AssocReq:", 9) == 0) {
+			val += 9;
+			param = "rsnxe_override_assoc";
+		} else if (strncasecmp(val, "EapolM2:", 8) == 0) {
+			val += 8;
+			param = "rsnxe_override_eapol";
+		} else {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "errorCode,Unsupported RSNXE_Content value");
+			return STATUS_SENT_ERROR;
+		}
+		snprintf(buf, sizeof(buf), "SET %s %s", param, val);
+		wpa_command(intf, buf);
+	}
+
 	val = get_param(cmd, "sae_pwe");
 	if (val) {
 		if (strcasecmp(val, "h2e") == 0) {
 			dut->sae_pwe = SAE_PWE_H2E;
-		} else if (strcasecmp(val, "loop") == 0) {
+		} else if (strcasecmp(val, "loop") == 0 ||
+			   strcasecmp(val, "looping") == 0) {
 			dut->sae_pwe = SAE_PWE_LOOP;
 		} else {
 			send_resp(dut, conn, SIGMA_ERROR,

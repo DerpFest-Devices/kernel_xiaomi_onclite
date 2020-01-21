@@ -275,6 +275,14 @@ void ath_config_dyn_bw_sig(struct sigma_dut *dut, const char *ifname,
 }
 
 
+static void wcn_config_ap_ldpc(struct sigma_dut *dut, const char *ifname)
+{
+	if (dut->ap_ldpc == VALUE_NOT_SET)
+		return;
+	run_iwpriv(dut, ifname, "ldpc %d", dut->ap_ldpc != VALUE_DISABLED);
+}
+
+
 static void mac80211_config_rts_force(struct sigma_dut *dut, const char *ifname,
 				      const char *val)
 {
@@ -1163,6 +1171,14 @@ static enum sigma_cmd_result cmd_ap_set_wireless(struct sigma_dut *dut,
 				  "errorCode,Unsupported LDPC");
 			return STATUS_SENT;
 		}
+		switch (get_driver_type(dut)) {
+		case DRIVER_WCN:
+		case DRIVER_LINUX_WCN:
+			wcn_config_ap_ldpc(dut, ifname);
+			break;
+		default:
+			break;
+		}
 	}
 
 	val = get_param(cmd, "BW_SGNL");
@@ -1234,6 +1250,7 @@ static enum sigma_cmd_result cmd_ap_set_wireless(struct sigma_dut *dut,
 	if (val) {
 		dut->ap_txBF = strcasecmp(val, "enable") == 0;
 		dut->he_sounding = VALUE_DISABLED;
+		dut->he_set_sta_1x1 = VALUE_ENABLED;
 	}
 
 	val = get_param(cmd, "MU_TxBF");
@@ -1752,6 +1769,14 @@ static enum sigma_cmd_result cmd_ap_set_wireless(struct sigma_dut *dut,
 				  "errorCode,Unsupported BCC value");
 			return STATUS_SENT_ERROR;
 		}
+		switch (get_driver_type(dut)) {
+		case DRIVER_WCN:
+		case DRIVER_LINUX_WCN:
+			wcn_config_ap_ldpc(dut, ifname);
+			break;
+		default:
+			break;
+		}
 	}
 
 	val = get_param(cmd, "FrgmntSupport");
@@ -1860,6 +1885,10 @@ static enum sigma_cmd_result cmd_ap_set_wireless(struct sigma_dut *dut,
 	val = get_param(cmd, "MinMPDUStartSpacing");
 	if (val)
 		dut->he_mmss = atoi(val);
+
+	val = get_param(cmd, "SRCtrl_SRValue15Allowed");
+	if (val)
+		dut->he_srctrl_allow = atoi(val);
 
 	return SUCCESS_SEND_STATUS;
 }
@@ -2223,13 +2252,26 @@ static enum sigma_cmd_result cmd_ap_set_security(struct sigma_dut *dut,
 	if (val) {
 		if (strcasecmp(val, "h2e") == 0) {
 			dut->sae_pwe = SAE_PWE_H2E;
-		} else if (strcasecmp(val, "loop") == 0) {
+		} else if (strcasecmp(val, "loop") == 0 ||
+			   strcasecmp(val, "looping") == 0) {
 			dut->sae_pwe = SAE_PWE_LOOP;
 		} else {
 			send_resp(dut, conn, SIGMA_ERROR,
 				  "errorCode,Unsupported sae_pwe value");
 			return STATUS_SENT_ERROR;
 		}
+	}
+
+	val = get_param(cmd, "RSNXE_Content");
+	if (val) {
+		if (strncasecmp(val, "EapolM3:", 8) != 0) {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "errorCode,Unsupported RSNXE_Content value");
+			return STATUS_SENT_ERROR;
+		}
+		val += 8;
+		free(dut->rsnxe_override_eapol);
+		dut->rsnxe_override_eapol = strdup(val);
 	}
 
 	val = get_param(cmd, "ENCRYPT");
@@ -4073,6 +4115,10 @@ static int owrt_ap_config_vap(struct sigma_dut *dut)
 		snprintf(buf, sizeof(buf), "%s", dut->rsne_override);
 		owrt_ap_set_vap(dut, vap_count, "own_ie_override", buf);
 	}
+
+	if (dut->rsnxe_override_eapol)
+		owrt_ap_set_vap(dut, vap_count, "rsnxe_override_eapol",
+				dut->rsnxe_override_eapol);
 
 	if (dut->sae_commit_override) {
 		snprintf(buf, sizeof(buf), "%s", dut->sae_commit_override);
@@ -6320,6 +6366,12 @@ static void ath_ap_set_params(struct sigma_dut *dut)
 		run_iwpriv(dut, basedev, "he_muedca_mode 0");
 		run_iwpriv(dut, ifname, "he_ul_ofdma 0");
 		run_iwpriv(dut, ifname, "he_dl_ofdma 0");
+		if (dut->he_set_sta_1x1 == VALUE_ENABLED) {
+			/* sets g_force_1x1_peer to 1 */
+			run_system_wrapper(dut,
+					   "wifitool %s setUnitTestCmd 0x48 2 118 1",
+					    ifname);
+		}
 		if (dut->ap_txBF) {
 			/* Enable SU_AX sounding */
 			run_iwpriv(dut, ifname, "he_sounding_mode 1");
@@ -6426,6 +6478,13 @@ static void ath_ap_set_params(struct sigma_dut *dut)
 		run_iwpriv(dut, ifname, "he_ul_shortgi 3");
 		run_iwpriv(dut, basedev, "he_ul_trig_int 2");
 
+		/* Disable efficiency check for UL OFDMA. We do not send TBPPDU
+		 * for one user. With this command, we would send UL OFDMA even
+		 * for one user to allow testing to be done without requiring
+		 * more than one station. */
+		run_system_wrapper(dut,
+				   "wifitool %s setUnitTestCmd 0x47 2 131 0",
+				   ifname);
 		/* Set random RU allocation */
 		run_system_wrapper(dut, "wifitool %s setUnitTestCmd 0x47 2 9 1",
 				   ifname);
@@ -6613,6 +6672,13 @@ static void ath_ap_set_params(struct sigma_dut *dut)
 
 	if (dut->he_mmss)
 		run_iwpriv(dut, ifname, "ampduden_ovrd %d", dut->he_mmss);
+
+	if (dut->he_srctrl_allow == 0) {
+		/* This is a special testbed AP case to enable SR for protocol
+		 * testing when SRCtrl_SRValue15Allowed is specified.
+		 */
+		run_iwpriv(dut, ifname, "he_sr_enable 1");
+	}
 }
 
 
@@ -7383,6 +7449,29 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 		ifname = get_main_ifname(dut);
 		fprintf(f, "hw_mode=ad\n");
 		break;
+	case AP_11ax:
+		if (dut->use_5g && dut->main_ifname_5g) {
+			ifname = dut->main_ifname_5g;
+		} else if (!dut->use_5g && dut->main_ifname_2g) {
+			ifname = dut->main_ifname_2g;
+		} else if (drv == DRIVER_QNXNTO || drv == DRIVER_LINUX_WCN) {
+			if (dut->main_ifname)
+				ifname = get_main_ifname(dut);
+			else
+				ifname = "wlan0";
+		} else if (drv == DRIVER_MAC80211) {
+			if (if_nametoindex("wlan1") > 0)
+				ifname = "wlan1";
+			else
+				ifname = "wlan0";
+		} else {
+			ifname = get_main_ifname(dut);
+		}
+		if (dut->use_5g)
+			fprintf(f, "hw_mode=a\n");
+		else
+			fprintf(f, "hw_mode=g\n");
+		break;
 	default:
 		fclose(f);
 		return -1;
@@ -7395,10 +7484,13 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 
 	if ((drv == DRIVER_MAC80211 || drv == DRIVER_QNXNTO ||
 	     drv == DRIVER_LINUX_WCN) &&
-	    (dut->ap_mode == AP_11ng || dut->ap_mode == AP_11na)) {
+	    (dut->ap_mode == AP_11ng || dut->ap_mode == AP_11na ||
+	     (dut->ap_mode == AP_11ax && !dut->use_5g))) {
 		int ht40plus = 0, ht40minus = 0, tx_stbc = 0;
 
 		fprintf(f, "ieee80211n=1\n");
+		if (dut->ap_mode == AP_11ax)
+			fprintf(f, "ieee80211ax=1\n");
 		if (dut->ap_mode == AP_11ng &&
 		    (dut->ap_chwidth == AP_40 ||
 		     (dut->ap_chwidth == AP_AUTO &&
@@ -7443,11 +7535,14 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 
 	if ((drv == DRIVER_MAC80211 || drv == DRIVER_QNXNTO ||
 	     drv == DRIVER_LINUX_WCN) &&
-	    dut->ap_mode == AP_11ac) {
+	    (dut->ap_mode == AP_11ac ||
+	    (dut->ap_mode == AP_11ax && dut->use_5g))) {
 		int ht40plus = 0, ht40minus = 0;
 
 		fprintf(f, "ieee80211ac=1\n"
 			"ieee80211n=1\n");
+		if (dut->ap_mode == AP_11ax)
+			fprintf(f, "ieee80211ax=1\n");
 
 		/* configure ht_capab based on channel width */
 		if (dut->ap_chwidth != AP_20) {
@@ -7808,6 +7903,9 @@ skip_key_mgmt:
 
 	if (dut->rsne_override)
 		fprintf(f, "own_ie_override=%s\n", dut->rsne_override);
+	if (dut->rsnxe_override_eapol)
+		fprintf(f, "rsnxe_override_eapol=%s\n",
+			dut->rsnxe_override_eapol);
 
 	if (dut->sae_commit_override)
 		fprintf(f, "sae_commit_override=%s\n",
@@ -8020,7 +8118,8 @@ skip_key_mgmt:
 		fprintf(f, "dpp_controller=ipaddr=%s pkhash=%s\n",
 			dut->ap_dpp_conf_addr, dut->ap_dpp_conf_pkhash);
 
-	if (dut->program == PROGRAM_VHT) {
+	if ((dut->program == PROGRAM_VHT) ||
+	    (dut->program == PROGRAM_HE && dut->use_5g)) {
 		int vht_oper_centr_freq_idx;
 
 		if (check_channel(dut->ap_channel) < 0) {
@@ -8065,6 +8164,11 @@ skip_key_mgmt:
 		fprintf(f, "vht_oper_centr_freq_seg0_idx=%d\n",
 			vht_oper_centr_freq_idx);
 		fprintf(f, "vht_oper_chwidth=%d\n", dut->ap_vht_chwidth);
+		if (dut->ap_mode == AP_11ax) {
+			fprintf(f, "he_oper_chwidth=%d\n", dut->ap_vht_chwidth);
+			fprintf(f, "he_oper_centr_freq_seg0_idx=%d\n",
+				vht_oper_centr_freq_idx);
+		}
 
 		if (dut->ap_sgi80 || dut->ap_txBF ||
 		    dut->ap_ldpc != VALUE_NOT_SET ||
@@ -8925,6 +9029,8 @@ static enum sigma_cmd_result cmd_ap_reset_default(struct sigma_dut *dut,
 	dut->he_mcsnssmap = 0;
 	dut->ap_fixed_rate = 0;
 	dut->he_mmss = 0;
+	dut->he_set_sta_1x1 = VALUE_DISABLED;
+	dut->he_srctrl_allow = -1;
 	if (dut->device_type == AP_testbed) {
 		dut->ap_he_dlofdma = VALUE_DISABLED;
 		dut->ap_he_frag = VALUE_DISABLED;
@@ -8947,9 +9053,18 @@ static enum sigma_cmd_result cmd_ap_reset_default(struct sigma_dut *dut,
 			dut->ap_mu_txBF = 0;
 			dut->he_sounding = VALUE_DISABLED;
 		} else {
-			dut->ap_txBF = 1;
-			dut->ap_mu_txBF = 1;
+			if (drv == DRIVER_WCN || drv == DRIVER_LINUX_WCN) {
+				dut->ap_txBF = 0;
+				dut->ap_mu_txBF = 0;
+			} else {
+				dut->ap_txBF = 1;
+				dut->ap_mu_txBF = 1;
+			}
 			dut->he_sounding = VALUE_ENABLED;
+			if (drv == DRIVER_LINUX_WCN) {
+				dut->ap_ldpc = VALUE_ENABLED;
+				wcn_config_ap_ldpc(dut, get_main_ifname(dut));
+			}
 		}
 		if (get_openwrt_driver_type() == OPENWRT_DRIVER_ATHEROS)
 			dut->ap_dfs_mode = AP_DFS_MODE_ENABLED;
@@ -8962,6 +9077,8 @@ static enum sigma_cmd_result cmd_ap_reset_default(struct sigma_dut *dut,
 
 	free(dut->rsne_override);
 	dut->rsne_override = NULL;
+	free(dut->rsnxe_override_eapol);
+	dut->rsnxe_override_eapol = NULL;
 
 	free(dut->sae_commit_override);
 	dut->sae_commit_override = NULL;
@@ -12306,8 +12423,9 @@ static int wcn_vht_chnum_band(struct sigma_dut *dut, const char *ifname,
 }
 
 
-static int wcn_ap_set_rfeature(struct sigma_dut *dut, struct sigma_conn *conn,
-			       struct sigma_cmd *cmd)
+static enum sigma_cmd_result wcn_ap_set_rfeature(struct sigma_dut *dut,
+						 struct sigma_conn *conn,
+						 struct sigma_cmd *cmd)
 {
 	const char *val;
 	const char *ifname;
@@ -12316,9 +12434,57 @@ static int wcn_ap_set_rfeature(struct sigma_dut *dut, struct sigma_conn *conn,
 
 	val = get_param(cmd, "chnum_band");
 	if (val && wcn_vht_chnum_band(dut, ifname, val) < 0)
-		return -1;
+		return ERROR_SEND_STATUS;
 
-	return 1;
+	val = get_param(cmd, "txBandwidth");
+	if (val) {
+		int old_ch_bw = dut->ap_chwidth;
+
+		if (strcasecmp(val, "Auto") == 0) {
+			dut->ap_chwidth = 0;
+		} else if (strcasecmp(val, "20") == 0) {
+			dut->ap_chwidth = 0;
+		} else if (strcasecmp(val, "40") == 0) {
+			dut->ap_chwidth = 1;
+		} else if (strcasecmp(val, "80") == 0) {
+			dut->ap_chwidth = 2;
+		} else if (strcasecmp(val, "160") == 0) {
+			dut->ap_chwidth = 3;
+		} else {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "ErrorCode,WIDTH not supported");
+			return STATUS_SENT_ERROR;
+		}
+		if (old_ch_bw != dut->ap_chwidth) {
+			if (cmd_ap_config_commit(dut, conn, cmd) <= 0)
+				return STATUS_SENT_ERROR;
+		} else {
+			sigma_dut_print(dut, DUT_MSG_DEBUG, "No change in BW");
+		}
+	}
+
+	val = get_param(cmd, "GI");
+	if (val) {
+		int fix_rate_sgi;
+
+		if (strcmp(val, "0.8") == 0) {
+			run_iwpriv(dut, ifname, "enable_short_gi 9");
+			fix_rate_sgi = 1;
+		} else if (strcmp(val, "1.6") == 0) {
+			run_iwpriv(dut, ifname, "enable_short_gi 10");
+			fix_rate_sgi = 2;
+		} else if (strcmp(val, "3.2") == 0) {
+			run_iwpriv(dut, ifname, "enable_short_gi 11");
+			fix_rate_sgi = 3;
+		} else {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "errorCode,GI value not supported");
+			return STATUS_SENT_ERROR;
+		}
+		run_iwpriv(dut, ifname, "enable_short_gi %d", fix_rate_sgi);
+	}
+
+	return SUCCESS_SEND_STATUS;
 }
 
 
