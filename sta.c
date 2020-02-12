@@ -238,16 +238,27 @@ int set_ps(const char *intf, struct sigma_dut *dut, int enabled)
 
 	if (wifi_chip_type == DRIVER_WCN) {
 		if (enabled) {
-			snprintf(buf, sizeof(buf), "iwpriv wlan0 dump 906");
-			if (system(buf) != 0)
-				goto set_power_save;
+			snprintf(buf, sizeof(buf), "iwpriv %s setPower 1",
+				 intf);
+			if (system(buf) != 0) {
+				snprintf(buf, sizeof(buf),
+					 "iwpriv wlan0 dump 906");
+				if (system(buf) != 0)
+					goto set_power_save;
+			}
 		} else {
-			snprintf(buf, sizeof(buf), "iwpriv wlan0 dump 905");
-			if (system(buf) != 0)
-				goto set_power_save;
-			snprintf(buf, sizeof(buf), "iwpriv wlan0 dump 912");
-			if (system(buf) != 0)
-				goto set_power_save;
+			snprintf(buf, sizeof(buf), "iwpriv %s setPower 2",
+				 intf);
+			if (system(buf) != 0) {
+				snprintf(buf, sizeof(buf),
+					 "iwpriv wlan0 dump 905");
+				if (system(buf) != 0)
+					goto set_power_save;
+				snprintf(buf, sizeof(buf),
+					 "iwpriv wlan0 dump 912");
+				if (system(buf) != 0)
+					goto set_power_save;
+			}
 		}
 
 		return 0;
@@ -2997,10 +3008,10 @@ int ath6kl_client_uapsd(struct sigma_dut *dut, const char *intf, int uapsd)
 		pos = path;
 	else
 		pos++;
-	snprintf(fname, sizeof(fname),
-		 "/sys/kernel/debug/ieee80211/%s/ath6kl/"
-		 "create_qos", pos);
-	if (!file_exists(fname))
+	res = snprintf(fname, sizeof(fname),
+		       "/sys/kernel/debug/ieee80211/%s/ath6kl/"
+		       "create_qos", pos);
+	if (res < 0 || res >= sizeof(fname) || !file_exists(fname))
 		return 0; /* not ath6kl */
 
 	if (uapsd) {
@@ -3014,9 +3025,11 @@ int ath6kl_client_uapsd(struct sigma_dut *dut, const char *intf, int uapsd)
 			"20000 0\n");
 		fclose(f);
 	} else {
-		snprintf(fname, sizeof(fname),
-			 "/sys/kernel/debug/ieee80211/%s/ath6kl/"
-			 "delete_qos", pos);
+		res = snprintf(fname, sizeof(fname),
+			       "/sys/kernel/debug/ieee80211/%s/ath6kl/"
+			       "delete_qos", pos);
+		if (res < 0 || res >= sizeof(fname))
+			return -1;
 
 		f = fopen(fname, "w");
 		if (f == NULL)
@@ -4588,8 +4601,8 @@ static int sta_set_he_fragmentation(struct sigma_dut *dut, const char *intf,
 }
 
 
-static int sta_set_he_ltf(struct sigma_dut *dut, const char *intf,
-			  enum qca_wlan_he_ltf_cfg ltf)
+int wcn_set_he_ltf(struct sigma_dut *dut, const char *intf,
+		   enum qca_wlan_he_ltf_cfg ltf)
 {
 	struct nl_msg *msg;
 	int ret = 0;
@@ -7497,7 +7510,7 @@ static void sta_reset_default_wcn(struct sigma_dut *dut, const char *intf,
 		iwpriv_sta_set_ampdu(dut, intf, 1);
 
 #ifdef NL80211_SUPPORT
-		if (sta_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_AUTO)) {
+		if (wcn_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_AUTO)) {
 			sigma_dut_print(dut, DUT_MSG_ERROR,
 					"Set LTF config to default in sta_reset_default_wcn failed");
 		}
@@ -11566,11 +11579,11 @@ static int wcn_sta_set_rfeature_he(const char *intf, struct sigma_dut *dut,
 	if (val) {
 #ifdef NL80211_SUPPORT
 		if (strcmp(val, "3.2") == 0) {
-			sta_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_1X);
+			wcn_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_1X);
 		} if (strcmp(val, "6.4") == 0) {
-			sta_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_2X);
+			wcn_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_2X);
 		} else if (strcmp(val, "12.8") == 0) {
-			sta_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_4X);
+			wcn_set_he_ltf(dut, intf, QCA_WLAN_HE_LTF_4X);
 		} else {
 			send_resp(dut, conn, SIGMA_ERROR,
 				  "errorCode, LTF value not supported");

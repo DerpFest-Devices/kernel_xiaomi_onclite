@@ -311,15 +311,15 @@ static void mac80211_config_rts_force(struct sigma_dut *dut, const char *ifname,
 
 	if (strcasecmp(val, "enable") == 0) {
 		dut->ap_sig_rts = VALUE_ENABLED;
-		snprintf(buf, sizeof(buf), "iw %s set rts 64", pos);
-		if (system(buf) != 0) {
+		res = snprintf(buf, sizeof(buf), "iw %s set rts 64", pos);
+		if (res < 0 || res >= sizeof(buf) || system(buf) != 0) {
 			sigma_dut_print(dut, DUT_MSG_ERROR,
 					"iw set rts 64 failed");
 		}
 	} else if (strcasecmp(val, "disable") == 0) {
 		dut->ap_sig_rts = VALUE_DISABLED;
-		snprintf(buf, sizeof(buf), "iw %s set rts 2347", pos);
-		if (system(buf) != 0) {
+		res = snprintf(buf, sizeof(buf), "iw %s set rts 2347", pos);
+		if (res < 0 || res >= sizeof(buf) || system(buf) != 0) {
 			sigma_dut_print(dut, DUT_MSG_ERROR,
 					"iw rts 2347 failed");
 		}
@@ -4153,7 +4153,7 @@ static int owrt_ap_config_vap(struct sigma_dut *dut)
 	if (dut->sae_reflection)
 		owrt_ap_set_vap(dut, vap_count, "sae_reflection_attack", "1");
 	if (dut->sae_confirm_immediate)
-		owrt_ap_set_vap(dut, vap_count, "sae_confirm_immediate", "1");
+		owrt_ap_set_vap(dut, vap_count, "sae_confirm_immediate", "2");
 
 	if (dut->ap_he_dlofdma == VALUE_ENABLED && dut->ap_he_ppdu == PPDU_MU) {
 		dut->ap_txBF = 0;
@@ -7567,6 +7567,19 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 		}
 	}
 
+	if (drv == DRIVER_LINUX_WCN && dut->ap_mode == AP_11ax) {
+		if (dut->ap_txBF) {
+			fprintf(f, "he_su_beamformer=1\n");
+			fprintf(f, "he_su_beamformee=1\n");
+			if (dut->ap_mu_txBF)
+				fprintf(f, "he_mu_beamformer=1\n");
+		} else {
+			fprintf(f, "he_su_beamformer=0\n");
+			fprintf(f, "he_su_beamformee=0\n");
+			fprintf(f, "he_mu_beamformer=0\n");
+		}
+	}
+
 	fprintf(f, "interface=%s\n", ifname);
 	if (dut->bridge)
 		fprintf(f, "bridge=%s\n", dut->bridge);
@@ -7933,7 +7946,7 @@ skip_key_mgmt:
 	if (dut->sae_reflection)
 		fprintf(f, "sae_reflection_attack=1\n");
 	if (dut->sae_confirm_immediate)
-		fprintf(f, "sae_confirm_immediate=1\n");
+		fprintf(f, "sae_confirm_immediate=2\n");
 
 	if (dut->ap_p2p_mgmt)
 		fprintf(f, "manage_p2p=1\n");
@@ -8475,14 +8488,16 @@ skip_key_mgmt:
 		return 0;
 	}
 
-	if (dut->program == PROGRAM_60GHZ && dut->ap_num_ese_allocs > 0) {
-		/* wait extra time for AP to start */
-		sleep(2);
-		if (ap_set_60g_ese(dut, dut->ap_num_ese_allocs,
-				   dut->ap_ese_allocs)) {
-			send_resp(dut, conn, SIGMA_ERROR,
-				  "errorCode,Could not set ExtSch");
-			return 0;
+	if (dut->program == PROGRAM_60GHZ) {
+		if (dut->ap_num_ese_allocs > 0) {
+			/* wait extra time for AP to start */
+			sleep(2);
+			if (ap_set_60g_ese(dut, dut->ap_num_ese_allocs,
+					   dut->ap_ese_allocs)) {
+				send_resp(dut, conn, SIGMA_ERROR,
+					  "errorCode,Could not set ExtSch");
+				return 0;
+			}
 		}
 		if (dut->ap_fixed_rate) {
 			sigma_dut_print(dut, DUT_MSG_DEBUG,
@@ -9064,6 +9079,13 @@ static enum sigma_cmd_result cmd_ap_reset_default(struct sigma_dut *dut,
 			if (drv == DRIVER_LINUX_WCN) {
 				dut->ap_ldpc = VALUE_ENABLED;
 				wcn_config_ap_ldpc(dut, get_main_ifname(dut));
+#ifdef NL80211_SUPPORT
+				if (wcn_set_he_ltf(dut, get_main_ifname(dut),
+						   QCA_WLAN_HE_LTF_AUTO)) {
+					sigma_dut_print(dut, DUT_MSG_ERROR,
+							"Failed to set LTF in ap_reset_default");
+				}
+#endif /* NL80211_SUPPORT */
 			}
 		}
 		if (get_openwrt_driver_type() == OPENWRT_DRIVER_ATHEROS)
@@ -10314,7 +10336,7 @@ static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
 	/* const char *ifname = get_param(cmd, "INTERFACE"); */
 	const char *val, *dest;
 	char *pos, buf[100];
-	int i, wlan_tag = 1;
+	int i, wlan_tag = 1, res;
 
 	sigma_dut_print(dut, DUT_MSG_INFO, "ap_set_hs2: Processing the "
 			"following parameters");
@@ -10555,8 +10577,11 @@ static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
 					  "errorCode,Invalid PLMN_MCC");
 				return 0;
 			}
-			snprintf(dut->ap_plmn_mcc[i],
-				 sizeof(dut->ap_plmn_mcc[i]), "%s", start);
+			res = snprintf(dut->ap_plmn_mcc[i],
+				       sizeof(dut->ap_plmn_mcc[i]), "%s",
+				       start);
+			if (res < 0 || res >= sizeof(dut->ap_plmn_mcc[i]))
+				return ERROR_SEND_STATUS;
 			sigma_dut_print(dut, DUT_MSG_INFO, "ap_plmn_mcc %s",
 					dut->ap_plmn_mcc[i]);
 			i++;
@@ -10569,8 +10594,10 @@ static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
 			return 0;
 		}
 		/* process last or only one */
-		snprintf(dut->ap_plmn_mcc[i],
-			sizeof(dut->ap_plmn_mcc[i]), "%s", start);
+		res = snprintf(dut->ap_plmn_mcc[i],
+			       sizeof(dut->ap_plmn_mcc[i]), "%s", start);
+		if (res < 0 || res >= sizeof(dut->ap_plmn_mcc[i]))
+			return ERROR_SEND_STATUS;
 		sigma_dut_print(dut, DUT_MSG_INFO, "ap_plmn_mcc %s",
 			dut->ap_plmn_mcc[i]);
 	}
@@ -10593,8 +10620,11 @@ static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
 					"errorCode,Invalid PLMN_MNC");
 				return 0;
 			}
-			snprintf(dut->ap_plmn_mnc[i],
-				 sizeof(dut->ap_plmn_mnc[i]), "%s", start);
+			res = snprintf(dut->ap_plmn_mnc[i],
+				       sizeof(dut->ap_plmn_mnc[i]), "%s",
+				       start);
+			if (res < 0 || res >= sizeof(dut->ap_plmn_mnc[i]))
+				return ERROR_SEND_STATUS;
 			sigma_dut_print(dut, DUT_MSG_INFO, "ap_plmn_mnc %s",
 				dut->ap_plmn_mnc[i]);
 			i++;
@@ -10606,8 +10636,10 @@ static enum sigma_cmd_result cmd_ap_set_hs2(struct sigma_dut *dut,
 				  "errorCode,Invalid PLMN_MNC");
 			return 0;
 		}
-		snprintf(dut->ap_plmn_mnc[i],
-			sizeof(dut->ap_plmn_mnc[i]), "%s", start);
+		res = snprintf(dut->ap_plmn_mnc[i],
+			       sizeof(dut->ap_plmn_mnc[i]), "%s", start);
+		if (res < 0 || res >= sizeof(dut->ap_plmn_mnc[i]))
+			return ERROR_SEND_STATUS;
 		sigma_dut_print(dut, DUT_MSG_INFO, "ap_plmn_mnc %s",
 			dut->ap_plmn_mnc[i]);
 	}
@@ -12482,6 +12514,27 @@ static enum sigma_cmd_result wcn_ap_set_rfeature(struct sigma_dut *dut,
 			return STATUS_SENT_ERROR;
 		}
 		run_iwpriv(dut, ifname, "enable_short_gi %d", fix_rate_sgi);
+	}
+
+	val = get_param(cmd, "LTF");
+	if (val) {
+#ifdef NL80211_SUPPORT
+		if (strcmp(val, "3.2") == 0) {
+			wcn_set_he_ltf(dut, ifname, QCA_WLAN_HE_LTF_1X);
+		} if (strcmp(val, "6.4") == 0) {
+			wcn_set_he_ltf(dut, ifname, QCA_WLAN_HE_LTF_2X);
+		} else if (strcmp(val, "12.8") == 0) {
+			wcn_set_he_ltf(dut, ifname, QCA_WLAN_HE_LTF_4X);
+		} else {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "errorCode,LTF value not supported");
+			return STATUS_SENT;
+		}
+#else /* NL80211_SUPPORT */
+		sigma_dut_print(dut, DUT_MSG_ERROR,
+				"LTF cannot be set without NL80211_SUPPORT defined");
+		return ERROR_SEND_STATUS;
+#endif /* NL80211_SUPPORT */
 	}
 
 	return SUCCESS_SEND_STATUS;
