@@ -7369,6 +7369,7 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 	const char *ifname;
 	char buf[500];
 	char path[100];
+	char ap_conf_path[100];
 	enum driver_type drv;
 	const char *key_mgmt;
 #ifdef ANDROID
@@ -7406,7 +7407,8 @@ enum sigma_cmd_result cmd_ap_config_commit(struct sigma_dut *dut,
 	if (drv == DRIVER_OPENWRT)
 		return cmd_owrt_ap_config_commit(dut, conn, cmd);
 
-	f = fopen(SIGMA_TMPDIR "/sigma_dut-ap.conf", "w");
+	f = fopen(concat_sigma_tmpdir(dut, "/sigma_dut-ap.conf", ap_conf_path,
+				      sizeof(ap_conf_path)), "w");
 	if (f == NULL) {
 		sigma_dut_print(dut, DUT_MSG_ERROR,
 				"%s: Failed to open sigma_dut-ap.conf",
@@ -8131,6 +8133,11 @@ skip_key_mgmt:
 		fprintf(f, "dpp_controller=ipaddr=%s pkhash=%s\n",
 			dut->ap_dpp_conf_addr, dut->ap_dpp_conf_pkhash);
 
+	if (dut->ap_he_rtsthrshld == VALUE_ENABLED)
+		fprintf(f, "he_rts_threshold=512\n");
+	else if (dut->ap_he_rtsthrshld == VALUE_DISABLED)
+		fprintf(f, "he_rts_threshold=1024\n");
+
 	if ((dut->program == PROGRAM_VHT) ||
 	    (dut->program == PROGRAM_HE && dut->use_5g)) {
 		int vht_oper_centr_freq_idx;
@@ -8328,26 +8335,30 @@ skip_key_mgmt:
 	/* Set proper conf file permissions so that hostapd process
 	 * can access it.
 	 */
-	if (chmod(SIGMA_TMPDIR "/sigma_dut-ap.conf",
+	if (chmod(concat_sigma_tmpdir(dut, "/sigma_dut-ap.conf", ap_conf_path,
+				      sizeof(ap_conf_path)),
 		  S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) < 0)
 		sigma_dut_print(dut, DUT_MSG_ERROR,
 				"Error changing permissions");
 
 	gr = getgrnam("wifi");
-	if (!gr ||
-	    chown(SIGMA_TMPDIR "/sigma_dut-ap.conf", -1, gr->gr_gid) < 0)
+	if (!gr || chown(concat_sigma_tmpdir(dut, "/sigma_dut-ap.conf",
+					     ap_conf_path, sizeof(ap_conf_path)),
+			 -1, gr->gr_gid) < 0)
 		sigma_dut_print(dut, DUT_MSG_ERROR, "Error changing groupid");
 #endif /* ANDROID */
 
 	if (drv == DRIVER_QNXNTO) {
 		snprintf(buf, sizeof(buf),
-			 "hostapd -B %s%s %s%s" SIGMA_TMPDIR
-			 "/sigma_dut-ap.conf",
-			 dut->hostapd_debug_log ? "-ddKt -f " : "",
+			 "hostapd -B %s%s%s %s%s %s/sigma_dut-ap.conf",
+			 dut->hostapd_debug_log ? "-dddKt " : "",
+			 (dut->hostapd_debug_log && dut->hostapd_debug_log[0]) ?
+			 "-f " : "",
 			 dut->hostapd_debug_log ? dut->hostapd_debug_log : "",
 			 dut->hostapd_entropy_log ? " -e" : "",
 			 dut->hostapd_entropy_log ? dut->hostapd_entropy_log :
-			 "");
+			 "",
+			 dut->sigma_tmpdir);
 	} else {
 		/*
 		 * It looks like a monitor interface can cause some issues for
@@ -8361,16 +8372,19 @@ skip_key_mgmt:
 
 		snprintf(path, sizeof(path), "%shostapd",
 			 file_exists("hostapd") ? "./" : "");
-		snprintf(buf, sizeof(buf), "%s -B%s%s%s%s%s " SIGMA_TMPDIR
-			 "/sigma_dut-ap.conf",
+		snprintf(buf, sizeof(buf),
+			 "%s -B%s%s%s%s%s%s %s/sigma_dut-ap.conf",
 			 dut->hostapd_bin ? dut->hostapd_bin : path,
-			 dut->hostapd_debug_log ? " -ddKt -f" : "",
+			 dut->hostapd_debug_log ? " -dddKt" : "",
+			 (dut->hostapd_debug_log && dut->hostapd_debug_log[0]) ?
+			 " -f " : "",
 			 dut->hostapd_debug_log ? dut->hostapd_debug_log : "",
 			 dut->hostapd_entropy_log ? " -e" : "",
 			 dut->hostapd_entropy_log ? dut->hostapd_entropy_log :
 			 "",
 			 dut->use_hostapd_pid_file ?
-			 " -P " SIGMA_DUT_HOSTAPD_PID_FILE : "");
+			 " -P " SIGMA_DUT_HOSTAPD_PID_FILE : "",
+			 dut->sigma_tmpdir);
 	}
 
 	sigma_dut_print(dut, DUT_MSG_DEBUG, "hostapd command: %s", buf);
@@ -8386,6 +8400,25 @@ skip_key_mgmt:
 		send_resp(dut, conn, SIGMA_ERROR,
 			  "errorCode,Failed to talk to hostapd");
 		return 0;
+	}
+
+	if (dut->ap_ba_bufsize != BA_BUFSIZE_NOT_SET) {
+		int buf_size;
+
+		if (dut->ap_ba_bufsize == BA_BUFSIZE_256)
+			buf_size = 256;
+		else
+			buf_size = 64;
+
+		if ((drv == DRIVER_WCN || drv == DRIVER_LINUX_WCN) &&
+		    sta_set_addba_buf_size(dut, ifname, buf_size)) {
+			send_resp(dut, conn, SIGMA_ERROR,
+				  "ErrorCode,set_addba_buf_size failed");
+			return STATUS_SENT_ERROR;
+		}
+
+		sigma_dut_print(dut, DUT_MSG_INFO,
+				"setting addba buf_size=%d", buf_size);
 	}
 
 	if (drv == DRIVER_LINUX_WCN) {
@@ -8412,6 +8445,12 @@ skip_key_mgmt:
 			return -1;
 		}
 	}
+
+	/* Configure the driver with LDPC setting for AP mode as a new vdev is
+	 * created when hostapd is started.
+	 */
+	if (drv == DRIVER_WCN || drv == DRIVER_LINUX_WCN)
+		wcn_config_ap_ldpc(dut, ifname);
 
 	if (dut->ap_l2tif) {
 		snprintf(path, sizeof(path),
