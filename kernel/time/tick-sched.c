@@ -25,6 +25,7 @@
 #include <linux/timer.h>
 #include <linux/context_tracking.h>
 #include <linux/rq_stats.h>
+#include <linux/mm.h>
 
 #include <asm/irq_regs.h>
 
@@ -821,6 +822,7 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
 	if (!ts->tick_stopped) {
 		nohz_balance_enter_idle(cpu);
 		calc_load_enter_idle();
+		quiet_vmstat();
 		cpu_load_update_nohz_start();
 
 		ts->last_tick = hrtimer_get_expires(&ts->sched_timer);
