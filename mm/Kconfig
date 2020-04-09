@@ -561,7 +561,8 @@ config ZSWAP
 	depends on FRONTSWAP && CRYPTO=y
 	select CRYPTO_LZO
 	select ZPOOL
-	default n
+	select BTREE
+	default y
 	help
 	  A lightweight compressed cache for swap pages.  It takes
 	  pages that are in the process of being swapped out and attempts to
