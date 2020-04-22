@@ -81,6 +81,8 @@ struct sigma_dut;
 #define MAX_PARAMS 100
 #define MAX_RADIO 3
 
+#define NAN_AWARE_IFACE "wifi-aware0"
+
 /* Set default operating channel width 80 MHz */
 #define VHT_DEFAULT_OPER_CHWIDTH AP_80_VHT_OPER_CHWIDTH
 
@@ -674,6 +676,8 @@ struct sigma_dut {
 	unsigned int ap_akm_values;
 	int ap_pmksa;
 	int ap_pmksa_caching;
+	int ap_beacon_prot;
+	u8 ap_transition_disable;
 	int ap_80plus80;
 	int ap_oper_chn;
 
@@ -784,6 +788,7 @@ struct sigma_dut {
 	pthread_t rtsp_thread_handle;
 	int wfd_device_type; /* 0 for source, 1 for sink */
 	char peer_mac_address[32];
+	char modified_peer_mac_address[32];
 	void *miracast_lib;
 	const char *miracast_lib_path;
 	char mdns_instance_name[64];
@@ -813,6 +818,7 @@ struct sigma_dut {
 		PROGRAM_WPA3,
 		PROGRAM_HE,
 		PROGRAM_HS2_R3,
+		PROGRAM_QM,
 	} program;
 
 	enum device_type {
@@ -938,6 +944,7 @@ struct sigma_dut {
 		SAE_PWE_LOOP,
 		SAE_PWE_H2E
 	} sae_pwe;
+	int owe_ptk_workaround;
 };
 
 
@@ -1124,6 +1131,7 @@ int get_wps_forced_version(struct sigma_dut *dut, const char *str);
 int base64_encode(const char *src, size_t len, char *out, size_t out_len);
 int random_get_bytes(char *buf, size_t len);
 int get_enable_disable(const char *val);
+int wcn_driver_cmd(const char *ifname, char *buf);
 
 /* uapsd_stream.c */
 void receive_uapsd(struct sigma_stream *s);
