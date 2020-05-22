@@ -384,7 +384,7 @@ int is_ext_spk_gpio_support(struct platform_device *pdev,
 				spk_ext_pa, 0);
 
 	if (pdata->spk_ext_pa_gpio < 0) {
-		dev_err(&pdev->dev,
+		dev_dbg(&pdev->dev,
 			"%s: missing %s in dt node\n", __func__, spk_ext_pa);
 	} else {
 		if (!gpio_is_valid(pdata->spk_ext_pa_gpio)) {
@@ -477,7 +477,7 @@ int is_us_eu_switch_gpio_support(struct platform_device *pdev,
 	pdata->us_euro_gpio = of_get_named_gpio(pdev->dev.of_node,
 					"qcom,cdc-us-euro-gpios", 0);
 	if (pdata->us_euro_gpio < 0) {
-		dev_err(&pdev->dev,
+		dev_dbg(&pdev->dev,
 			"property %s in node %s not found %d\n",
 			"qcom,cdc-us-euro-gpios", pdev->dev.of_node->full_name,
 			pdata->us_euro_gpio);
@@ -3200,7 +3200,7 @@ parse_mclk_freq:
 						pdev->dev.of_node, wsa,
 						i, &wsa_str);
 				if (ret) {
-					dev_err(&pdev->dev,
+					dev_dbg(&pdev->dev,
 						"%s:of read string %s i %d error %d\n",
 						__func__, wsa, i, ret);
 					goto err;
@@ -3225,7 +3225,7 @@ parse_mclk_freq:
 						pdev->dev.of_node, wsa_prefix,
 						i, &wsa_prefix_str);
 				if (ret) {
-					dev_err(&pdev->dev,
+					dev_dbg(&pdev->dev,
 						"%s:of read string %s i %d error %d\n",
 						__func__, wsa_prefix, i, ret);
 					goto err;
@@ -3266,11 +3266,11 @@ parse_mclk_freq:
 		ret = of_property_read_string_index(pdev->dev.of_node,
 				ext_pa, i, &ext_pa_str);
 		if (ret) {
-			dev_err(&pdev->dev, "%s:of read string %s i %d error %d\n",
+			dev_dbg(&pdev->dev, "%s:of read string %s i %d error %d\n",
 					__func__, ext_pa, i, ret);
 			goto err;
 		}
-		dev_err(&pdev->dev, "%s:of read string %s i %d ret %d\n",
+		dev_dbg(&pdev->dev, "%s:of read string %s i %d ret %d\n",
 					__func__, ext_pa, i, ret);
 		if (!strcmp(ext_pa_str, "primary"))
 			pdata->ext_pa = (pdata->ext_pa | PRI_MI2S_ID);
@@ -3287,7 +3287,7 @@ parse_mclk_freq:
 	pdata->spk_ext_pa_gpio = of_get_named_gpio(pdev->dev.of_node,
 							spk_ext_pa, 0);
 	if (pdata->spk_ext_pa_gpio < 0) {
-		dev_err(&pdev->dev, "%s: missing %s in dt node\n",
+		dev_dbg(&pdev->dev, "%s: missing %s in dt node\n",
 			__func__, spk_ext_pa);
 	}
 
@@ -3328,7 +3328,7 @@ parse_mclk_freq:
 		goto err;
 	}
 	if (!strcmp(type, "external")) {
-		dev_err(&pdev->dev, "Headset is using external micbias\n");
+		dev_dbg(&pdev->dev, "Headset is using external micbias\n");
 		mbhc_cfg.hs_ext_micbias = true;
 	} else {
 		dev_err(&pdev->dev, "Headset is using internal micbias\n");
@@ -3396,7 +3396,7 @@ parse_mclk_freq:
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
-		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
+		dev_dbg(&pdev->dev, "snd_soc_register_card failed (%d)\n",
 			ret);
 		goto err;
 	}
