@@ -1532,7 +1532,6 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 	/* Allow 3 retries for everything but isoc, set CErr = 3 */
 	if (!usb_endpoint_xfer_isoc(&ep->desc))
 		err_count = 3;
-
 	/* HS bulk max packet should be 512, FS bulk supports 8, 16, 32 or 64 */
 	if (usb_endpoint_xfer_bulk(&ep->desc)) {
 		if (udev->speed == USB_SPEED_HIGH)
@@ -1542,7 +1541,6 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 			max_packet = clamp_val(max_packet, 8, 64);
 		}
 	}
-
 	/* xHCI 1.0 and 1.1 indicates that ctrl ep avg TRB Length should be 8 */
 	if (usb_endpoint_xfer_control(&ep->desc) && xhci->hci_version >= 0x100)
 		avg_trb_len = 8;
@@ -2074,14 +2072,10 @@ no_bw:
 	kfree(xhci->port_array);
 	kfree(xhci->rh_bw);
 	kfree(xhci->ext_caps);
-	kfree(xhci->usb2_rhub.psi);
-	kfree(xhci->usb3_rhub.psi);
 
 	xhci->usb2_ports = NULL;
 	xhci->usb3_ports = NULL;
 	xhci->port_array = NULL;
-	xhci->usb2_rhub.psi = NULL;
-	xhci->usb3_rhub.psi = NULL;
 	xhci->rh_bw = NULL;
 	xhci->ext_caps = NULL;
 
