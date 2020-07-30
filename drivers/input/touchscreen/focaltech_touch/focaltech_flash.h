@@ -83,9 +83,7 @@
 #define FTS_UPGRADE_LOOP                            30
 #define FTS_HEADER_LEN                              32
 #define FTS_FW_BIN_FILEPATH                         "/sdcard/"
-
-#define FTS_LOCKDOWN_LEN                             128
-#define FTS_FW_NAME_MAX_LEN                          50  //add lockdowninfo by likang @20171010
+#define FTS_FW_NAME_LEN			64
 
 #define FTS_ROMBOOT_CMD_ECC_NEW_LEN                 7
 #define FTS_ROMBOOT_CMD_ECC_FINISH                  0xCE
@@ -94,18 +92,18 @@
 #define AL2_FCS_COEF                ((1 << 15) + (1 << 10) + (1 << 3))
 
 enum FW_STATUS {
-    FTS_RUN_IN_ERROR,
-    FTS_RUN_IN_APP,
-    FTS_RUN_IN_ROM,
-    FTS_RUN_IN_PRAM,
-    FTS_RUN_IN_BOOTLOADER,
+	FTS_RUN_IN_ERROR,
+	FTS_RUN_IN_APP,
+	FTS_RUN_IN_ROM,
+	FTS_RUN_IN_PRAM,
+	FTS_RUN_IN_BOOTLOADER,
 };
 
 enum FW_FLASH_MODE {
-    FLASH_MODE_APP,
-    FLASH_MODE_LIC,
-    FLASH_MODE_PARAM,
-    FLASH_MODE_ALL,
+	FLASH_MODE_APP,
+	FLASH_MODE_LIC,
+	FLASH_MODE_PARAM,
+	FLASH_MODE_ALL,
 };
 
 /*****************************************************************************
@@ -113,49 +111,46 @@ enum FW_FLASH_MODE {
 *****************************************************************************/
 /* IC info */
 struct upgrade_func {
-    u64 ctype[FTX_MAX_COMPATIBLE_TYPE];
-    int newmode;
-    u32 fwveroff;
-    u32 fwcfgoff;
-    u32 appoff;
-    u32 licoff;
-    u32 paramcfgoff;
-    u32 paramcfgveroff;
-    u32 paramcfg2off;
-    bool hid_supported;
-    bool pramboot_supported;
-    u8 *pramboot;
-    u32 pb_length;
-    int (*init)(void);
-    int (*upgrade)(struct i2c_client *, u8 *, u32);
-    int (*get_hlic_ver)(u8 *);
-    int (*lic_upgrade)(struct i2c_client *, u8 *, u32);
-    int (*param_upgrade)(struct i2c_client *, u8 *, u32);
-    int (*force_upgrade)(struct i2c_client *, u8 *, u32);
+	u64 ctype[FTX_MAX_COMPATIBLE_TYPE];
+	int newmode;
+	u32 fwveroff;
+	u32 fwcfgoff;
+	u32 appoff;
+	u32 licoff;
+	u32 paramcfgoff;
+	u32 paramcfgveroff;
+	u32 paramcfg2off;
+	bool hid_supported;
+	bool pramboot_supported;
+	u8 *pramboot;
+	u32 pb_length;
+	int (*init)(void);
+	int (*upgrade)(struct i2c_client *, u8 *, u32);
+	int (*get_hlic_ver)(u8 *);
+	int (*lic_upgrade)(struct i2c_client *, u8 *, u32);
+	int (*param_upgrade)(struct i2c_client *, u8 *, u32);
+	int (*force_upgrade)(struct i2c_client *, u8 *, u32);
 };
 
 struct fts_upgrade {
-    u8 *fw;
-    u32 fw_length;
-    u8 *lic;
-    u32 lic_length;
-    struct upgrade_func *func;
+	u8 *fw;
+	u32 fw_length;
+	u8 *lic;
+	u32 lic_length;
+	struct upgrade_func *func;
 };
 
 struct upgrade_fw {
-    u16 vendor_id;
-    u8 *fw_file;
-    u32 fw_len;
+	u16 vendor_id;
+	u8 *fw_file;
+	u32 fw_len;
 };
-
-u8 fts_LockDownInfo_get(struct i2c_client *client,char *pProjectCode);
-//add lockdowninfo by likang @20171010
 
 /*****************************************************************************
 * Global variable or extern global variabls/functions
 *****************************************************************************/
 extern struct fts_upgrade *fwupgrade;
-extern struct upgrade_func upgrade_func_ft5422u;
+extern struct upgrade_func upgrade_func_ft5x46;
 
 /*****************************************************************************
 * Static function prototypes
@@ -171,4 +166,8 @@ int fts_fwupg_erase(struct i2c_client *client, u32 delay);
 int fts_fwupg_ecc_cal(struct i2c_client *client, u32 saddr, u32 len);
 int fts_flash_write_buf(struct i2c_client *client, u32 saddr, u8 *buf, u32 len, u32 delay);
 int fts_fwupg_upgrade(struct i2c_client *client, struct fts_upgrade *upg);
+int fts_get_firmware_name(char *fw_name, size_t size, u16 id);
+
+/*Add by HQ-102007757 for sending tp hw info*/
+int fts_fwupg_get_ver_in_tp(struct i2c_client *client, u8 *ver);
 #endif

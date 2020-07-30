@@ -33,9 +33,6 @@
 * Included header files
 *****************************************************************************/
 #include "focaltech_core.h"
-
-
-#include "../lct_tp_fm_info.h"
 #if defined(CONFIG_FB)
 #include <linux/notifier.h>
 #include <linux/fb.h>
@@ -44,6 +41,9 @@
 #define FTS_SUSPEND_LEVEL 1     /* Early-suspend level */
 #endif
 
+/*Add by HQ-102007757 for sending tp hw info*/
+#include "focaltech_flash.h"
+#include <linux/hqsysfs.h>
 /*****************************************************************************
 * Private constant and macro definitions using #define
 *****************************************************************************/
@@ -57,30 +57,79 @@
 #define FTS_I2C_VTG_MAX_UV                  1800000
 #endif
 
+#define FTS_RESUME_EN                    1
 /*****************************************************************************
 * Global variable or extern global variabls/functions
 *****************************************************************************/
 struct fts_ts_data *fts_data;
-
 /*****************************************************************************
 * Static function prototypes
 *****************************************************************************/
 static void fts_release_all_finger(void);
 static int fts_ts_suspend(struct device *dev);
 static int fts_ts_resume(struct device *dev);
-/*add for reslove the issue of resume&suspend time by qujiong begin */
-static void tp_fb_notifier_resume_work(struct work_struct *work);
-static void tp_fb_notifier_suspend_work(struct work_struct *work);
-/*add for reslove the issue of resume&suspend time by qujiong end */
 
-/* add verify LCD by qujiong start */
-extern char g_lcd_id[128];
-/* add verify LCD by qujiong end */
+/************************************************************************
+* Name: create reusme workqueue
+* Brief: put resume period into workqueue
+* Date: Add by HQ-102007757 [Date: 2019-3-22]
+***********************************************************************/
+#if FTS_RESUME_EN
 
-/*add charging flag for TP FW by qujiong begin*/
-extern bool g_charger_present;
-int charging_flag = 0;
-/*add charging flag for TP FW by qujiong end*/
+#define FTS_RESUME_WAIT_TIME             20
+
+static struct delayed_work fts_resume_work;
+static struct workqueue_struct *fts_resume_workqueue;
+
+static void fts_resume_func(struct work_struct *work)
+{
+	struct fts_ts_data *data = fts_data;
+	FTS_DEBUG("Enter %s", __func__);
+
+	fts_ts_resume(&data->client->dev);
+
+
+}
+
+void fts_resume_queue_work(void)
+{
+	cancel_delayed_work(&fts_resume_work);
+	queue_delayed_work(fts_resume_workqueue, &fts_resume_work, msecs_to_jiffies(FTS_RESUME_WAIT_TIME));
+}
+
+int fts_resume_init(void)
+{
+	INIT_DELAYED_WORK(&fts_resume_work, fts_resume_func);
+	fts_resume_workqueue = create_workqueue("fts_resume_wq");
+	if (fts_resume_workqueue == NULL) {
+		FTS_ERROR("Failed to create fts_resume_workqueue!!!");
+	} else {
+		FTS_DEBUG("Success to create fts_resume_workqueue!!!");
+	}
+
+	return 0;
+}
+
+int fts_resume_exit(void)
+{
+	destroy_workqueue(fts_resume_workqueue);
+
+	return 0;
+}
+#endif
+
+/*Add by HQ-102007757 [Date: 2018-12-26]*/
+static int C3H_LCD_VENDOR;
+
+/************************************************************************
+* Name: get_lcd_vendor
+* Brief: get lcd vendor from lockdown val[1]
+* Date: Add by HQ-102007757 [Date: 2018-12-26]
+***********************************************************************/
+int *get_lcd_vendor(void)
+{
+	return &C3H_LCD_VENDOR;
+}
 
 /*****************************************************************************
 *  Name: fts_wait_tp_to_valid
@@ -160,10 +209,11 @@ static int fts_get_chip_types(
 *  Output:
 *  Return: return 0 if success, otherwise return error code
 *****************************************************************************/
-static int fts_get_ic_information(struct fts_ts_data *ts_data)
+int fts_get_ic_information(struct fts_ts_data *ts_data)
 {
 	int ret = 0;
 	int cnt = 0;
+
 	u8 chip_id[2] = { 0 };
 	u8 id_cmd[4] = { 0 };
 	u32 id_cmd_len = 0;
@@ -326,6 +376,9 @@ static int fts_power_source_init(struct fts_ts_data *data)
 	int ret = 0;
 
 	FTS_FUNC_ENTER();
+
+	gpio_direction_output(fts_data->pdata->reset_gpio, 0);
+	msleep(8);
 
 	data->vdd = regulator_get(&data->client->dev, "vdd");
 	if (IS_ERR(data->vdd)) {
@@ -661,8 +714,11 @@ static int fts_input_report_b(struct fts_ts_data *data)
 			touchs |= BIT(events[i].id);
 			data->touchs |= BIT(events[i].id);
 
-			FTS_DEBUG("[B]P%d(%d, %d)[p:%d,tm:%d] DOWN!", events[i].id, events[i].x,
-					  events[i].y, events[i].p, events[i].area);
+
+			if (events[i].flag == FTS_TOUCH_DOWN) {
+				FTS_DEBUG("[B]P%d(%d, %d)[p:%d,tm:%d] DOWN!", events[i].id, events[i].x,
+						events[i].y, events[i].p, events[i].area);
+			}
 		} else {
 			uppoint++;
 			input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, false);
@@ -885,24 +941,6 @@ static irqreturn_t fts_ts_interrupt(int irq, void *data)
 		FTS_ERROR("[INTR]: Invalid fts_ts_data");
 		return IRQ_HANDLED;
 	}
-/*add charging flag for TP FW by qujiong begin*/
-	if(g_charger_present)
-	{
-		if(charging_flag==0)
-		{
-			charging_flag = 1;
-			fts_i2c_write_reg(fts_data->client, 0x8B, 0x01);
-		}
-	}
-	else
-	{
-		if(charging_flag == 1)
-		{
-			charging_flag = 0;
-			fts_i2c_write_reg(fts_data->client, 0x8B, 0x00);
-		}
-	}
-/*add charging flag for TP FW by qujiong end*/	
 
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_set_intr(1);
@@ -943,8 +981,8 @@ static int fts_irq_registration(struct fts_ts_data *ts_data)
 		pdata->irq_gpio_flags = IRQF_TRIGGER_FALLING;
 	FTS_INFO("irq flag:%x", pdata->irq_gpio_flags);
 	ret = request_threaded_irq(ts_data->irq, NULL, fts_ts_interrupt,
-					           pdata->irq_gpio_flags | IRQF_ONESHOT | IRQF_PERF_CRITICAL,
-					           ts_data->client->name, ts_data);
+							   pdata->irq_gpio_flags | IRQF_ONESHOT,
+							   ts_data->client->name, ts_data);
 
 	return ret;
 }
@@ -1018,10 +1056,7 @@ static int fts_input_init(struct fts_ts_data *ts_data)
 		ret = -ENOMEM;
 		goto err_event_buf;
 	}
-	/*add for fts select gesture mode*/
-#if FTS_GESTURE_EN
-	input_dev->event = fts_select_gesture_mode;
-#endif
+
 
 	ret = input_register_device(input_dev);
 	if (ret) {
@@ -1076,6 +1111,7 @@ static int fts_gpio_configure(struct fts_ts_data *data)
 			goto err_irq_gpio_dir;
 		}
 	}
+
 	/* request reset gpio */
 	if (gpio_is_valid(data->pdata->reset_gpio)) {
 		ret = gpio_request(data->pdata->reset_gpio, "fts_reset_gpio");
@@ -1113,7 +1149,7 @@ err_irq_gpio_req:
 *  Return: return 0 if succuss, otherwise return error code
 *****************************************************************************/
 static int fts_get_dt_coords(struct device *dev, char *name,
-					         struct fts_ts_platform_data *pdata)
+							 struct fts_ts_platform_data *pdata)
 {
 	int ret = 0;
 	u32 coords[FTS_COORDS_ARR_SIZE] = { 0 };
@@ -1181,7 +1217,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
 			FTS_ERROR("Key number undefined!");
 
 		ret = of_property_read_u32_array(np, "focaltech,keys",
-					                     pdata->keys, pdata->key_number);
+										 pdata->keys, pdata->key_number);
 		if (ret)
 			FTS_ERROR("Keys undefined!");
 		else if (pdata->key_number > FTS_MAX_KEYS)
@@ -1192,7 +1228,7 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
 			FTS_ERROR("Key Y Coord undefined!");
 
 		ret = of_property_read_u32_array(np, "focaltech,key-x-coords",
-					                     pdata->key_x_coords, pdata->key_number);
+										 pdata->key_x_coords, pdata->key_number);
 		if (ret)
 			FTS_ERROR("Key X Coords undefined!");
 
@@ -1232,24 +1268,6 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
 }
 
 #if defined(CONFIG_FB)
-
-/*add for reslove the issue of resume&suspend time by qujiong begin */
-static void tp_fb_notifier_resume_work(struct work_struct *work)
-{
-	struct fts_ts_data *fts_data =
-			container_of(work, struct fts_ts_data,fb_notify_work);
-	fts_ts_resume(&fts_data->client->dev);
-}
-
-static void tp_fb_notifier_suspend_work(struct work_struct *work)
-{
-	struct fts_ts_data *fts_data =
-			container_of(work, struct fts_ts_data,fb_notify_suspend_work);
-	fts_ts_suspend(&fts_data->client->dev);
-}
-
-/*add for reslove the issue of resume&suspend time by qujiong end */
-
 /*****************************************************************************
 *  Name: fb_notifier_callback
 *  Brief:
@@ -1258,29 +1276,29 @@ static void tp_fb_notifier_suspend_work(struct work_struct *work)
 *  Return:
 *****************************************************************************/
 static int fb_notifier_callback(struct notifier_block *self,
-					            unsigned long event, void *data)
+								unsigned long event, void *data)
 {
 	struct fb_event *evdata = data;
 	int *blank;
 	struct fts_ts_data *fts_data =
 		container_of(self, struct fts_ts_data, fb_notif);
 
+	FTS_DEBUG("Enter %s", __func__);
+
 	if (evdata && evdata->data && event == FB_EVENT_BLANK &&
-		fts_data && fts_data->client) 
-	{
+		fts_data && fts_data->client) {
 		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK && event == FB_EVENT_BLANK) 
-		{
-			schedule_work(&fts_data->fb_notify_work);
-			//fts_ts_resume(&fts_data->client->dev);
-		}
-		else if (*blank == FB_BLANK_POWERDOWN  && event == FB_EVENT_BLANK) 
-		{
-			flush_work(&fts_data->fb_notify_work);
-			schedule_work(&fts_data->fb_notify_suspend_work);
-			//fts_ts_suspend(&fts_data->client->dev);
-		}
+		if (*blank == FB_BLANK_UNBLANK)
+#if FTS_RESUME_EN
+			fts_resume_queue_work();
+#else
+			fts_ts_resume(&fts_data->client->dev);
+#endif
+		else if (*blank == FB_BLANK_POWERDOWN)
+			fts_ts_suspend(&fts_data->client->dev);
 	}
+
+	FTS_DEBUG("Exit %s", __func__);
 
 	return 0;
 }
@@ -1295,8 +1313,8 @@ static int fb_notifier_callback(struct notifier_block *self,
 static void fts_ts_early_suspend(struct early_suspend *handler)
 {
 	struct fts_ts_data *data = container_of(handler,
-					                        struct fts_ts_data,
-					                        early_suspend);
+											struct fts_ts_data,
+											early_suspend);
 
 	fts_ts_suspend(&data->client->dev);
 }
@@ -1311,12 +1329,21 @@ static void fts_ts_early_suspend(struct early_suspend *handler)
 static void fts_ts_late_resume(struct early_suspend *handler)
 {
 	struct fts_ts_data *data = container_of(handler,
-					                        struct fts_ts_data,
-					                        early_suspend);
+											struct fts_ts_data,
+											early_suspend);
 
+	FTS_DEBUG("Enter %s", __func__);
+
+#if FTS_RESUME_EN
+	fts_resume_queue_work();
+#else
 	fts_ts_resume(&data->client->dev);
+#endif
+
+	FTS_DEBUG("Exit %s", __func__);
 }
 #endif
+
 /*****************************************************************************
 *  Name: fts_ts_probe
 *  Brief:
@@ -1324,17 +1351,15 @@ static void fts_ts_late_resume(struct early_suspend *handler)
 *  Output:
 *  Return:
 *****************************************************************************/
+struct i2c_client *hw_client;
 static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int ret = 0;
 	struct fts_ts_platform_data *pdata;
 	struct fts_ts_data *ts_data;
-	u8 regvalue = 0;
-#ifdef SUPPORT_READ_TP_VERSION
-		char fw_version[64];
-#endif
-	
+
 	FTS_FUNC_ENTER();
+
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		FTS_ERROR("I2C not supported");
 		return -ENODEV;
@@ -1368,19 +1393,15 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	ts_data->client = client;
 	ts_data->pdata = pdata;
 	i2c_set_clientdata(client, ts_data);
+	hw_client = client;
 
 	ts_data->ts_workqueue = create_singlethread_workqueue("fts_wq");
 	if (NULL == ts_data->ts_workqueue) {
 		FTS_ERROR("failed to create fts workqueue");
 	}
 
-	/*add for reslove the issue of resume&suspend time by qujiong begin */
-	INIT_WORK(&ts_data->fb_notify_work, tp_fb_notifier_resume_work);
-	INIT_WORK(&ts_data->fb_notify_suspend_work, tp_fb_notifier_suspend_work);
-	/*add for reslove the issue of resume&suspend time by qujiong end */
-
-
 	spin_lock_init(&ts_data->irq_lock);
+	mutex_init(&ts_data->report_mutex);
 	mutex_init(&ts_data->report_mutex);
 
 	ret = fts_input_init(ts_data);
@@ -1411,7 +1432,6 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 #endif
 #endif
 
-
 	ret = fts_gpio_configure(ts_data);
 	if (ret) {
 		FTS_ERROR("[GPIO]Failed to configure the gpios");
@@ -1427,18 +1447,6 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 		FTS_ERROR("not focal IC, unregister driver");
 		goto err_irq_req;
 	}
-
-	//add lockdowninfo by likang @20171010
-	fts_LockDownInfo_get(client,ts_data->tp_lockdown_info_temp);
-	printk("[FTS][tp_lockdown_info] lockdown=%s\n", ts_data->tp_lockdown_info_temp);
-	//end by likang @20171010
-
-#ifdef SUPPORT_READ_TP_VERSION
-	fts_i2c_read_reg(client, FTS_REG_FW_VER, &regvalue);
-	memset(fw_version, 0, sizeof(fw_version));
-	sprintf(fw_version, "[FW]0x%02x,[IC]FT5446", regvalue);
-	init_tp_fm_info(0, fw_version, "O-film");
-#endif
 
 #if FTS_APK_NODE_EN
 	ret = fts_create_apk_debug_channel(ts_data);
@@ -1473,15 +1481,6 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	}
 #endif
 
-#if FTS_TEST_EN
-	ret = fts_test_init(client);
-	if (ret) {
-		FTS_ERROR("init production test fail");
-	}
-#endif
-
-	init_tp_selftest(client);
-
 #if FTS_ESDCHECK_EN
 	ret = fts_esdcheck_init(ts_data);
 	if (ret) {
@@ -1500,6 +1499,10 @@ static int fts_ts_probe(struct i2c_client *client, const struct i2c_device_id *i
 	if (ret) {
 		FTS_ERROR("init fw upgrade fail");
 	}
+#endif
+
+#if FTS_RESUME_EN
+	fts_resume_init();
 #endif
 
 #if defined(CONFIG_FB)
@@ -1576,10 +1579,6 @@ static int fts_ts_remove(struct i2c_client *client)
 	fts_fwupg_exit(ts_data);
 #endif
 
-#if FTS_TEST_EN
-	fts_test_exit(client);
-#endif
-
 #if FTS_ESDCHECK_EN
 	fts_esdcheck_exit(ts_data);
 #endif
@@ -1624,6 +1623,14 @@ static int fts_ts_remove(struct i2c_client *client)
 	return 0;
 }
 
+
+static const struct dev_pm_ops fts_ts_pm_ops = {
+	.suspend = fts_ts_suspend,
+	.resume = fts_ts_resume,
+};
+
+
+
 /*****************************************************************************
 *  Name: fts_ts_suspend
 *  Brief:
@@ -1661,18 +1668,24 @@ static int fts_ts_suspend(struct device *dev)
 	fts_irq_disable();
 
 #if FTS_POWER_SOURCE_CUST_EN
-	ret = fts_power_source_ctrl(ts_data, DISABLE);
+	/*ret = fts_power_source_ctrl(ts_data, DISABLE);
 	if (ret < 0) {
 		FTS_ERROR("power off fail, ret=%d", ret);
-	}
-#if FTS_PINCTRL_EN
-	fts_pinctrl_select_suspend(ts_data);
-#endif
-#else
+	}*/
+
 	/* TP enter sleep mode */
 	ret = fts_i2c_write_reg(ts_data->client, FTS_REG_POWER_MODE, FTS_REG_POWER_MODE_SLEEP_VALUE);
 	if (ret < 0)
 		FTS_ERROR("set TP to sleep mode fail, ret=%d", ret);
+
+#if FTS_PINCTRL_EN
+	fts_pinctrl_select_suspend(ts_data);
+#endif
+
+	/* TP enter sleep mode */
+
+
+
 #endif
 
 	ts_data->suspended = true;
@@ -1700,20 +1713,15 @@ static int fts_ts_resume(struct device *dev)
 	fts_release_all_finger();
 
 #if FTS_POWER_SOURCE_CUST_EN
-	fts_power_source_ctrl(ts_data, ENABLE);
+
 #if FTS_PINCTRL_EN
 	fts_pinctrl_select_normal(ts_data);
 #endif
 #endif
-	/*add for i2c error after rst by qujiong begin*/
-	fts_irq_disable();
-	/*add for i2c error after rst by qujiong end*/
+
 	if (!ts_data->ic_info.is_incell) {
 		fts_reset_proc(200);
 	}
-	/*add for i2c error after rst by qujiong begin*/
-	fts_irq_enable();
-	/*add for i2c error after rst by qujiong end*/
 
 	fts_tp_state_recovery(ts_data->client);
 
@@ -1721,29 +1729,16 @@ static int fts_ts_resume(struct device *dev)
 	fts_esdcheck_resume();
 #endif
 
-/*add charging flag for TP FW by qujiong begin*/
-	if(charging_flag == 1)
-	{
-		if(g_charger_present)
-			charging_flag = 0;
-	}
-	else
-	{
-		if(!g_charger_present)
-			charging_flag = 1;
-	}
-/*add charging flag for TP FW by qujiong end*/
-
 #if FTS_GESTURE_EN
-	if (fts_gesture_resume(ts_data->client) == 0) 
-	{
+	if (fts_gesture_resume(ts_data->client) == 0) {
 		ts_data->suspended = false;
 		return 0;
 	}
 #endif
 
 	ts_data->suspended = false;
-	//fts_irq_enable();
+	fts_irq_enable();
+
 	FTS_FUNC_EXIT();
 	return 0;
 }
@@ -1758,7 +1753,7 @@ static const struct i2c_device_id fts_ts_id[] = {
 MODULE_DEVICE_TABLE(i2c, fts_ts_id);
 
 static struct of_device_id fts_match_table[] = {
-	{ .compatible = "focaltech,fts", },
+	{ .compatible = "focaltech,fts"},
 	{ },
 };
 
@@ -1769,6 +1764,10 @@ static struct i2c_driver fts_ts_driver = {
 		.name = FTS_DRIVER_NAME,
 		.owner = THIS_MODULE,
 		.of_match_table = fts_match_table,
+
+		.pm = &fts_ts_pm_ops,
+
+
 	},
 	.id_table = fts_ts_id,
 };
@@ -1785,29 +1784,8 @@ static int __init fts_ts_init(void)
 	int ret = 0;
 
 	FTS_FUNC_ENTER();
-	/* add verify LCD by qujiong start */
-	if (IS_ERR_OR_NULL(g_lcd_id))
-	{
-		FTS_ERROR("g_lcd_id is ERROR!\n");
-		ret = -ENODEV;
-		return ret;
-	}
-	else
-	{
-		if (strstr(g_lcd_id,"boe hx8394f") != NULL)
-		{
-			FTS_INFO("LCM is right! [Vendor]boe [IC]hx8394f\n");
-		}
-		else
-		{
-			FTS_ERROR("Unknown LCM!\n");
-			ret = -ENODEV;
-			return ret;
-		}
-	}
-	/* add verify LCD by qujiong end */
 	ret = i2c_add_driver(&fts_ts_driver);
-	if ( ret != 0 ) {
+	if (ret != 0) {
 		FTS_ERROR("Focaltech touch screen driver init failed!");
 	}
 	FTS_FUNC_EXIT();

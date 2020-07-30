@@ -55,7 +55,7 @@
 #define FTS_CHIP_IDC            ((FTS_CHIP_TYPE & FLAGBIT(FLAG_IDC_BIT)) == FLAGBIT(FLAG_IDC_BIT))
 #define FTS_HID_SUPPORTTED      ((FTS_CHIP_TYPE & FLAGBIT(FLAG_HID_BIT)) == FLAGBIT(FLAG_HID_BIT))
 
-#define FTS_CHIP_TYPE_MAPPING {{0x82,0x54, 0x22, 0x54, 0x22, 0x54, 0x2D, 0x54, 0x2E}}
+#define FTS_CHIP_TYPE_MAPPING { {0x02, 0x54, 0x22, 0x54, 0x22, 0x00, 0x00, 0x54, 0x2C} }
 
 #define I2C_BUFFER_LENGTH_MAXINUM           256
 #define FILE_NAME_LENGTH                    128
@@ -100,11 +100,11 @@
 #define FTS_SYSFS_ECHO_OFF(buf)     (buf[0] == '0')
 
 #define kfree_safe(pbuf) do {\
-    if (pbuf) {\
-        kfree(pbuf);\
-        pbuf = NULL;\
-    }\
-} while(0)
+	if (pbuf) {\
+		kfree(pbuf);\
+		pbuf = NULL;\
+	} \
+} while (0)
 
 /*****************************************************************************
 *  Alternative mode (When something goes wrong, the modules may be able to solve the problem.)
@@ -115,27 +115,25 @@
  */
 #define FTS_POINT_REPORT_CHECK_EN               0
 
-
 /*****************************************************************************
 * Global variable or extern global variabls/functions
 *****************************************************************************/
 struct ft_chip_t {
-    u64 type;
-    u8 chip_idh;
-    u8 chip_idl;
-    u8 rom_idh;
-    u8 rom_idl;
-    u8 pb_idh;
-    u8 pb_idl;
-    u8 bl_idh;
-    u8 bl_idl;
+	u64 type;
+	u8 chip_idh;
+	u8 chip_idl;
+	u8 rom_idh;
+	u8 rom_idl;
+	u8 pb_idh;
+	u8 pb_idl;
+	u8 bl_idh;
+	u8 bl_idl;
 };
-int init_tp_selftest(struct i2c_client * client);
 
 struct ts_ic_info {
-    bool is_incell;
-    bool hid_supported;
-    struct ft_chip_t ids;
+	bool is_incell;
+	bool hid_supported;
+	struct ft_chip_t ids;
 };
 
 /*****************************************************************************

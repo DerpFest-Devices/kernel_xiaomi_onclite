@@ -188,7 +188,7 @@ int fts_i2c_read_reg(struct i2c_client *client, u8 regaddr, u8 *regvalue)
 /************************************************************************
 * HID to standard I2C
 ***********************************************************************/
-int fts_i2c_hid2std(struct i2c_client *client)
+void fts_i2c_hid2std(struct i2c_client *client)
 {
 	int ret = 0;
 	u8 buf[3] = {0xeb, 0xaa, 0x09};
@@ -208,7 +208,6 @@ int fts_i2c_hid2std(struct i2c_client *client)
 			FTS_ERROR("hidi2c change to stdi2c fail");
 		}
 	}
-	return ret;
 }
 
 /************************************************************************

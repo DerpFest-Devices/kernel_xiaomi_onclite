@@ -28,8 +28,8 @@
 * Version: v1.0
 *
 ************************************************************************/
-#ifndef _LINUX_FOCLATECH_CONFIG_H_
-#define _LINUX_FOCLATECH_CONFIG_H_
+#ifndef _LINUX_FOCALTECH_CONFIG_H_
+#define _LINUX_FOCALTECH_CONFIG_H_
 
 /**************************************************/
 /****** G: A, I: B, S: C, U: D  ******************/
@@ -102,7 +102,7 @@
 /*
  * choose your ic chip type of focaltech
  */
-#define FTS_CHIP_TYPE   _FT5446DQS_Q02
+#define FTS_CHIP_TYPE   _FT5446
 
 /******************* Enables *********************/
 /*********** 1 to enable, 0 to disable ***********/
@@ -123,7 +123,7 @@
  * Report Pressure in multitouch
  * 1:enable(default),0:disable
 */
-#define FTS_REPORT_PRESSURE_EN                  1
+#define FTS_REPORT_PRESSURE_EN                  0
 
 /*
  * Gesture function enable
@@ -135,24 +135,20 @@
  * ESD check & protection
  * default: disable
  */
-#define FTS_ESDCHECK_EN                         1
-
-/*
- * Production test enable
- * 1: enable, 0:disable(default)
- */
-#define FTS_TEST_EN                             1
+#define FTS_ESDCHECK_EN                         0
 
 /*
  * Glove mode enable
  * 1: enable, 0:disable(default)
  */
 #define FTS_GLOVE_EN                            0
+
 /*
  * cover enable
  * 1: enable, 0:disable(default)
  */
 #define FTS_COVER_EN                            0
+
 /*
  * Charger enable
  * 1: enable, 0:disable(default)
@@ -162,30 +158,29 @@
 /*
  * Nodes for tools, please keep enable
  */
-#define FTS_SYSFS_NODE_EN                       1
-#define FTS_APK_NODE_EN                         1
+#define FTS_SYSFS_NODE_EN                       0
+#define FTS_APK_NODE_EN                         0
 
 /*
  * Pinctrl enable
  * default: disable
  */
-#define FTS_PINCTRL_EN                          0
+#define FTS_PINCTRL_EN                          1
 
 /*
  * Customer power enable
  * enable it when customer need control TP power
  * default: disable
  */
-#define FTS_POWER_SOURCE_CUST_EN                0
-
+#define FTS_POWER_SOURCE_CUST_EN                1
 
 /****************************************************/
 
 /********************** Upgrade ****************************/
 /*
- * auto upgrade, please keep enable
+ * auto upgrade
  */
-#define FTS_AUTO_UPGRADE_EN                     1
+#define FTS_AUTO_UPGRADE_EN						0
 
 /*
  * auto upgrade for lcd cfg
@@ -193,11 +188,16 @@
 #define FTS_AUTO_LIC_UPGRADE_EN                 0
 
 /*
+ * Numbers of modules support
+ */
+#define FTS_GET_MODULE_NUM                      0
+
+/*
  * Check vendor_id number
  * 0:No check vendor_id (default)
  * 1/2/3: Check vendor_id for vendor compatibility
  */
-#define FTS_GET_VENDOR_ID_NUM                   2
+#define FTS_GET_VENDOR_ID_NUM                   0
 
 /*
  * vendor_id(s) for vendor(s) to be compatible with.
@@ -208,29 +208,10 @@
  * FTS_GET_VENDOR_ID_NUM >= 2, compatible with FTS_VENDOR_ID2
  * FTS_GET_VENDOR_ID_NUM >= 3, compatible with FTS_VENDOR_ID3
  */
-#define FTS_VENDOR_ID                          0x0000
-#define FTS_VENDOR_ID2                         0x51
+#define FTS_VENDOR_ID                          0x5a
+#define FTS_VENDOR_ID2                         0x6d
 #define FTS_VENDOR_ID3                         0x0000
-
-/*
- * FW.i file for auto upgrade, you must replace it with your own
- * define your own fw_file, the sample one to be replaced is invalid
- * NOTE: if FTS_GET_VENDOR_ID_NUM > 1, it's the fw corresponding with FTS_VENDOR_ID
- */
-#define FTS_UPGRADE_FW_FILE                      "include/firmware/LQ_F6_FT5446DQS-M03_BOE_Black_V16_D01_20190327_app.i"
-
-/*
- * if FTS_GET_VENDOR_ID_NUM >= 2, fw corrsponding with FTS_VENDOR_ID2
- * define your own fw_file, the sample one is invalid
- */
-#define FTS_UPGRADE_FW2_FILE                     "include/firmware/LQ_F6_FT5446DQS-M03_BOE_Black_V16_D01_20190327_app.i"
-
-/*
- * if FTS_GET_VENDOR_ID_NUM >= 3, fw corrsponding with FTS_VENDOR_ID3
- * define your own fw_file, the sample one is invalid
- */
-#define FTS_UPGRADE_FW3_FILE                     "include/firmware/LQ_F6_FT5446DQS-M03_BOE_Black_V16_D01_20190327_app.i"
 
 /*********************************************************/
 
-#endif /* _LINUX_FOCLATECH_CONFIG_H_ */
+#endif /* _LINUX_FOCALTECH_CONFIG_H_ */

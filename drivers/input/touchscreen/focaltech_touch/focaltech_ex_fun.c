@@ -34,6 +34,7 @@
 * 1.Included header files
 *****************************************************************************/
 #include "focaltech_core.h"
+#include "focaltech_flash.h"
 
 /*****************************************************************************
 * Private constant and macro definitions using #define
@@ -258,7 +259,7 @@ static const struct file_operations fts_proc_fops = {
 * Return: data len
 ***********************************************************************/
 static int fts_debug_write(struct file *filp,
-					       const char __user *buff, unsigned long len, void *data)
+						   const char __user *buff, unsigned long len, void *data)
 {
 	int ret = 0;
 	u8 writebuf[PROC_WRITE_BUF_SIZE] = { 0 };
@@ -308,7 +309,7 @@ static int fts_debug_write(struct file *filp,
 	case PROC_SET_SLAVE_ADDR:
 #if (FTS_CHIP_TYPE == _FT8201)
 		ret = client->addr;
-		FTS_DEBUG("Original i2c addr 0x%x ", ret << 1 );
+		FTS_DEBUG("Original i2c addr 0x%x ", ret << 1);
 		if (writebuf[1] != client->addr) {
 			client->addr = writebuf[1];
 			FTS_DEBUG("Change i2c addr 0x%x to 0x%x", ret << 1, writebuf[1] << 1);
@@ -354,8 +355,8 @@ static int fts_debug_write(struct file *filp,
 * Output: page point to data
 * Return: read char number
 ***********************************************************************/
-static int fts_debug_read( char *page, char **start,
-					       off_t off, int count, int *eof, void *data )
+static int fts_debug_read(char *page, char **start,
+						   off_t off, int count, int *eof, void *data)
 {
 	int ret = 0;
 	u8 buf[PROC_READ_BUF_SIZE] = { 0 };
@@ -423,7 +424,7 @@ static int fts_debug_read( char *page, char **start,
 int fts_create_apk_debug_channel(struct fts_ts_data *ts_data)
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
-	ts_data->proc = proc_create(PROC_NAME, 0777, NULL, &fts_proc_fops);
+	ts_data->proc = proc_create(PROC_NAME, 0664, NULL, &fts_proc_fops);
 #else
 	ts_data->proc = create_proc_entry(PROC_NAME, 0777, NULL);
 #endif
@@ -586,7 +587,7 @@ static ssize_t fts_tprwreg_show(struct device *dev, struct device_attribute *att
 			} else {
 				if (rw_op.opbuf) {
 					for (i = 0; i < rw_op.len; i++) {
-					    count += snprintf(buf + count, PAGE_SIZE, "%02X ", rw_op.opbuf[i]);
+						count += snprintf(buf + count, PAGE_SIZE, "%02X ", rw_op.opbuf[i]);
 					}
 					count += snprintf(buf + count, PAGE_SIZE, "\n");
 				}
@@ -977,37 +978,6 @@ static ssize_t fts_dumpreg_show(struct device *dev, struct device_attribute *att
 	return count;
 }
 
-//add lockdowninfo by likang @20171010
-static ssize_t fts_lockdown_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
-	struct fts_ts_data *data = i2c_get_clientdata(client);
-	size_t ret = -1;
-
-	if(data->tp_lockdown_info_temp == NULL)
-	{
-		return  ret;
-	}
-
-	return snprintf(buf, FTS_LOCKDOWN_LEN - 1, "%s\n", data->tp_lockdown_info_temp);
-}
-
-static ssize_t fts_lockdown_store(struct device *dev,
-		struct device_attribute *attr,const char *buf, size_t size)
-{
-	struct fts_ts_data *data = dev_get_drvdata(dev);
-
-	if (size > FTS_FW_NAME_MAX_LEN - 1)
-		return -EINVAL;
-	strlcpy(data->tp_lockdown_info_temp, buf, size);
-	if (data->tp_lockdown_info_temp[size-1] == '\n')
-		data->tp_lockdown_info_temp[size-1] = 0;
-
-	return size;
-}
-//add end by likang @20171010
-
 /* get the fw version  example:cat fw_version */
 static DEVICE_ATTR(fts_fw_version, S_IRUGO | S_IWUSR, fts_tpfwver_show, fts_tpfwver_store);
 
@@ -1033,9 +1003,6 @@ static DEVICE_ATTR(fts_dump_reg, S_IRUGO | S_IWUSR, fts_dumpreg_show, fts_dumpre
 static DEVICE_ATTR(fts_hw_reset, S_IRUGO | S_IWUSR, fts_hw_reset_show, fts_hw_reset_store);
 static DEVICE_ATTR(fts_irq, S_IRUGO | S_IWUSR, fts_irq_show, fts_irq_store);
 
-static DEVICE_ATTR(tp_lock_down_info, S_IWUSR|S_IRUGO,fts_lockdown_show, fts_lockdown_store);
-//add lockdowninfo by likang @20171010
-
 /* add your attr in here*/
 static struct attribute *fts_attributes[] = {
 	&dev_attr_fts_fw_version.attr,
@@ -1046,7 +1013,6 @@ static struct attribute *fts_attributes[] = {
 	&dev_attr_fts_driver_info.attr,
 	&dev_attr_fts_hw_reset.attr,
 	&dev_attr_fts_irq.attr,
-	&dev_attr_tp_lock_down_info.attr,//add lockdowninfo by likang @20171010
 	NULL
 };
 

@@ -59,7 +59,7 @@ struct fts_mode_flag g_fts_mode_flag;
 *****************************************************************************/
 int fts_enter_glove_mode(struct i2c_client *client, int mode);
 int fts_enter_cover_mode(struct i2c_client *client, int mode);
-int fts_enter_charger_mode(struct i2c_client *client, int mode );
+int fts_enter_charger_mode(struct i2c_client *client, int mode);
 
 /*****************************************************************************
 * 6.Static function prototypes
@@ -118,7 +118,7 @@ static ssize_t fts_touch_glove_store(struct device *dev, struct device_attribute
 * Output: no
 * Return: success >=0, otherwise failed
 ***********************************************************************/
-int fts_enter_glove_mode( struct i2c_client *client, int mode)
+int fts_enter_glove_mode(struct i2c_client *client, int mode)
 {
 	int ret = 0;
 	static u8 buf_addr[2] = { 0 };
@@ -130,7 +130,7 @@ int fts_enter_glove_mode( struct i2c_client *client, int mode)
 	else
 		buf_value[0] = 0x00;
 
-	ret = fts_i2c_write_reg( client, buf_addr[0], buf_value[0]);
+	ret = fts_i2c_write_reg(client, buf_addr[0], buf_value[0]);
 	if (ret < 0) {
 		FTS_ERROR("[Mode]fts_enter_glove_mode write value fail");
 	}
@@ -200,7 +200,7 @@ static ssize_t fts_touch_cover_store(struct device *dev, struct device_attribute
 * Output: no
 * Return: success >=0, otherwise failed
 ***********************************************************************/
-int  fts_enter_cover_mode( struct i2c_client *client, int mode)
+int  fts_enter_cover_mode(struct i2c_client *client, int mode)
 {
 	int ret = 0;
 	static u8 buf_addr[2] = { 0 };
@@ -212,7 +212,7 @@ int  fts_enter_cover_mode( struct i2c_client *client, int mode)
 	else
 		buf_value[0] = 0x00;
 
-	ret = fts_i2c_write_reg( client, buf_addr[0], buf_value[0]);
+	ret = fts_i2c_write_reg(client, buf_addr[0], buf_value[0]);
 	if (ret < 0) {
 		FTS_ERROR("[Mode] fts_enter_cover_mode write value fail \n");
 	}
@@ -295,7 +295,7 @@ int  fts_enter_charger_mode(struct i2c_client *client, int mode)
 	else
 		buf_value[0] = 0x00;
 
-	ret = fts_i2c_write_reg( client, buf_addr[0], buf_value[0]);
+	ret = fts_i2c_write_reg(client, buf_addr[0], buf_value[0]);
 	if (ret < 0) {
 		FTS_DEBUG("[Mode]fts_enter_charger_mode write value fail");
 	}
