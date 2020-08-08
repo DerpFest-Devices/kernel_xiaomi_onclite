@@ -125,7 +125,7 @@ static enum sigma_cmd_result sta_server_cert_trust(struct sigma_dut *dut,
 
 	snprintf(buf, sizeof(buf), "hash://server/sha256/%s",
 		 dut->server_cert_hash);
-	if (set_network_quoted(get_station_ifname(), dut->infra_network_id,
+	if (set_network_quoted(get_station_ifname(dut), dut->infra_network_id,
 			       "ca_cert", buf) < 0) {
 		strlcpy(resp,
 			"ServerCertTrustResult,OverrideNotAllowed,Reason,Could not configure server certificate hash for the network profile",
@@ -133,9 +133,9 @@ static enum sigma_cmd_result sta_server_cert_trust(struct sigma_dut *dut,
 		goto done;
 	}
 
-	if (set_network(get_station_ifname(), dut->infra_network_id,
+	if (set_network(get_station_ifname(dut), dut->infra_network_id,
 			"domain_match", "NULL") < 0 ||
-	    set_network(get_station_ifname(), dut->infra_network_id,
+	    set_network(get_station_ifname(dut), dut->infra_network_id,
 			"domain_suffix_match", "NULL") < 0) {
 		strlcpy(resp,
 			"ServerCertTrustResult,OverrideNotAllowed,Reason,Could not clear domain matching rules",
@@ -143,20 +143,20 @@ static enum sigma_cmd_result sta_server_cert_trust(struct sigma_dut *dut,
 		goto done;
 	}
 
-	wpa_command(get_station_ifname(), "DISCONNECT");
+	wpa_command(get_station_ifname(dut), "DISCONNECT");
 	snprintf(buf, sizeof(buf), "SELECT_NETWORK %d", dut->infra_network_id);
-	if (wpa_command(get_station_ifname(), buf) < 0) {
+	if (wpa_command(get_station_ifname(dut), buf) < 0) {
 		sigma_dut_print(dut, DUT_MSG_INFO, "Failed to select "
 				"network id %d on %s",
 				dut->infra_network_id,
-				get_station_ifname());
+				get_station_ifname(dut));
 		strlcpy(resp,
 			"ServerCertTrustResult,Accepted,Result,Could not request reconnection",
 			sizeof(resp));
 		goto done;
 	}
 
-	ctrl = open_wpa_mon(get_station_ifname());
+	ctrl = open_wpa_mon(get_station_ifname(dut));
 	if (!ctrl)
 		goto done;
 
@@ -243,6 +243,47 @@ done:
 }
 
 
+static enum sigma_cmd_result wpa3_dev_exec_action(struct sigma_dut *dut,
+						  struct sigma_conn *conn,
+						  struct sigma_cmd *cmd)
+{
+	const char *val;
+	char buf[4000], buf2[100], *pos, *end;
+
+	val = get_param(cmd, "Rejected_DH_Groups");
+	if (val) {
+		val = get_param(cmd, "Dest_MAC");
+		if (!val)
+			return ERROR_SEND_STATUS;
+		snprintf(buf2, sizeof(buf2), "STA %s", val);
+		if (wpa_command_resp(dut->hostapd_ifname, buf2,
+				     buf, sizeof(buf)) < 0)
+			return ERROR_SEND_STATUS;
+		pos = buf;
+		while (pos) {
+			if (strncmp(pos, "sae_rejected_groups=", 20) == 0)
+				break;
+			pos = strchr(pos, '\n');
+			if (pos)
+				pos++;
+		}
+		if (pos) {
+			pos += 20;
+			end = strchr(pos, '\n');
+			if (end)
+				*end = '\0';
+		}
+		snprintf(buf2, sizeof(buf2), "DHGroupVerResult,%s",
+			 pos ? pos : "");
+		send_resp(dut, conn, SIGMA_COMPLETE, buf2);
+		return STATUS_SENT;
+
+	}
+
+	return ERROR_SEND_STATUS;
+}
+
+
 static enum sigma_cmd_result cmd_dev_exec_action(struct sigma_dut *dut,
 						 struct sigma_conn *conn,
 						 struct sigma_cmd *cmd)
@@ -265,6 +306,9 @@ static enum sigma_cmd_result cmd_dev_exec_action(struct sigma_dut *dut,
 	val = get_param(cmd, "ServerCertTrust");
 	if (val)
 		return sta_server_cert_trust(dut, conn, val);
+
+	if (program && strcasecmp(program, "WPA3") == 0)
+		return wpa3_dev_exec_action(dut, conn, cmd);
 
 	return ERROR_SEND_STATUS;
 }
