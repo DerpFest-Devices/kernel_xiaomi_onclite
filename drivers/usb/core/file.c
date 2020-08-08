@@ -194,7 +194,7 @@ int usb_register_dev(struct usb_interface *intf,
 	if (intf->minor < 0) {
 		up_write(&minor_rwsem);
 		return -EXFULL;
-        }
+	}
 
 	/* create a usb class device for this usb interface */
 	snprintf(name, sizeof(name), class_driver->name, minor - minor_base);
