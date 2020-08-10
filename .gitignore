@@ -123,3 +123,11 @@ kernel/configs/android-*.cfg
 #Ignoring Android.bp link file
 #
 Android.bp
+
+# Don't track content of these folders
+AnyKernel3
+clang
+libufdt
+stock
+stock_32
+out
