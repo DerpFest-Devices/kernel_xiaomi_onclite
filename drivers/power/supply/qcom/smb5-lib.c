@@ -685,12 +685,13 @@ static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 		 * detected as as SDP
 		 */
 		if (!(apsd_result->pst == POWER_SUPPLY_TYPE_USB_FLOAT &&
-			chg->real_charger_type == POWER_SUPPLY_TYPE_USB))
+			chg->real_charger_type == POWER_SUPPLY_TYPE_USB)) {
 			chg->real_charger_type = apsd_result->pst;
-			if (apsd_result->pst == POWER_SUPPLY_TYPE_USB){
-			pr_err("lct will vote for sdp current\n");
-			vote(chg->usb_icl_votable, USB_PSY_VOTER, true, SDP_CURRENT_UA);
+			if (apsd_result->pst == POWER_SUPPLY_TYPE_USB) {
+				pr_err("lct will vote for sdp current\n");
+				vote(chg->usb_icl_votable, USB_PSY_VOTER, true, SDP_CURRENT_UA);
 			}
+		}
 	}
 
 	//smblib_dbg(chg, PR_MISC, "APSD=%s PD=%d\n",
