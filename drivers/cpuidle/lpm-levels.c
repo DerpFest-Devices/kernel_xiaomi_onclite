@@ -740,8 +740,8 @@ static int cpu_power_select(struct cpuidle_device *dev,
 				predicted = lpm_cpuidle_predict(dev, cpu,
 					&idx_restrict, &idx_restrict_time,
 					&ipi_predicted);
-				if (predicted && (predicted < min_residency))
-					predicted = min_residency;
+				if (predicted && (predicted < min_residency[i]))
+					predicted = min_residency[i];
 			} else
 				invalidate_predict_history(dev);
 		}
