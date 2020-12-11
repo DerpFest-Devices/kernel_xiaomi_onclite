@@ -26,32 +26,27 @@ CROSS_COMPILE_ARM32="arm-linux-gnueabi-"
 _ksetup_old_path="$PATH"
 export PATH="$clang_bin:$PATH"
 
-# Index of variables for cleanup in unsetup
-_ksetup_vars+=(
-	clang_bin
-	gcc_prefix64
-	gcc_prefix32
-	jobs
-	kmake_flags
-)
-
-kmake_flags+=(
-	CC="clang"
-	AR="llvm-ar"
-	NM="llvm-nm"
-	OBJCOPY="llvm-objcopy"
-	OBJDUMP="llvm-objdump"
-	STRIP="llvm-strip"
-
-	CROSS_COMPILE="$gcc_prefix64"
-	CROSS_COMPILE_ARM32="$gcc_prefix32"
-)
-
 # Build start
-make O=out $CONFIG
-make -j$(nproc --all) O=out \
-                      ARCH=arm64 \
-                      CC=clang \
+make	O=out $CONFIG
+make	\
+	O=out \
+	ARCH=arm64 \
+	CC="ccache clang" \
+	AR=llvm-ar \
+	NM=llvm-nm \
+	LD=ld.lld \
+	STRIP=llvm-strip \
+	OBJCOPY=llvm-objcopy \
+	OBJDUMP=llvm-objdump \
+	OBJSIZE=llvm-size \
+	READELF=llvm-readelf \
+	HOSTCC=clang \
+	HOSTCXX=clang++ \
+	HOSTAR=llvm-ar \
+	HOSTLD=ld.lld \
+	CROSS_COMPILE=aarch64-linux-gnu- \
+	CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+	-j`nproc --all`
 
 if ! [ -a $KERN_IMG ]; then
     echo "Build error!"
@@ -77,7 +72,7 @@ for MODULES in $(find "${OUTDIR}" -name '*.ko'); do
             "${MODULES}"
     find "${OUTDIR}" -name '*.ko' -exec cp {} "${VENDOR_MODULEDIR}" \;
 done
-cd libufdt/src && python mkdtboimg.py create $OUTDIR/arch/arm64/boot/dtbo.img $OUTDIR/arch/arm64/boot/dts/qcom/*.dtbo
+cd libufdt/src && python2 mkdtboimg.py create $OUTDIR/arch/arm64/boot/dtbo.img $OUTDIR/arch/arm64/boot/dts/qcom/*.dtbo
 echo -e "\n(i) Done moving modules"
 
 cd $ZIP_DIR
