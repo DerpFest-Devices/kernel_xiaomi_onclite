@@ -118,3 +118,8 @@ all.config
 
 # fetched Android config fragments
 kernel/configs/android-*.cfg
+
+# Don't track content of these folders
+AnyKernel3
+libufdt
+out
