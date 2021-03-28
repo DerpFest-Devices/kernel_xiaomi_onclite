@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -99,7 +99,7 @@
 #include "qwlan_version.h"
 #include "wlan_logging_sock_svc.h"
 #include "wlan_hdd_misc.h"
-
+#include <linux/wcnss_wlan.h>
 
 #define g_mode_rates_size (12)
 #define a_mode_rates_size (8)
@@ -619,6 +619,14 @@ static const struct nla_policy wlan_hdd_tm_policy[WLAN_HDD_TM_ATTR_MAX + 1] =
                                     .len = WLAN_HDD_TM_DATA_MAX_LEN },
 };
 #endif /* WLAN_NL80211_TESTMODE */
+
+#ifdef FEATURE_WLAN_SW_PTA
+bool hdd_is_sw_pta_enabled(hdd_context_t *hdd_ctx)
+{
+	return hdd_ctx->cfg_ini->is_sw_pta_enabled ||
+		wcnss_is_sw_pta_enabled();
+}
+#endif
 
 #ifdef FEATURE_WLAN_CH_AVOID
 /*
@@ -6134,7 +6142,8 @@ __wlan_hdd_cfg80211_get_supported_features(struct wiphy *wiphy,
 #endif
 
 #ifdef FEATURE_WLAN_LFR
-    if (sme_IsFeatureSupportedByFW(BSSID_BLACKLIST)) {
+    if (pHddCtx->cfg_ini->bssid_blacklist_timeout &&
+        sme_IsFeatureSupportedByFW(BSSID_BLACKLIST)) {
         fset |= WIFI_FEATURE_CONTROL_ROAMING;
         hddLog(LOG1, FL("CONTROL_ROAMING supported by driver"));
     }
@@ -11180,7 +11189,6 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
     struct ieee80211_mgmt *pMgmt_frame;
     v_U8_t *pIe=NULL;
     v_U16_t capab_info;
-    eCsrAuthType RSNAuthType;
     eCsrEncryptionType RSNEncryptType;
     eCsrEncryptionType mcRSNEncryptType;
     int status = VOS_STATUS_SUCCESS, ret = 0;
@@ -11191,6 +11199,7 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
     struct qc_mac_acl_entry *acl_entry = NULL;
     hdd_config_t *iniConfig;
     v_SINT_t i;
+    uint32_t ii;
     hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pHostapdAdapter);
     hdd_adapter_t *sta_adapter;
     tSmeConfigParams *psmeConfig;
@@ -11421,7 +11430,7 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
                         vos_get_context( VOS_MODULE_ID_SME, pVosContext),
                         &RSNEncryptType,
                         &mcRSNEncryptType,
-                        &RSNAuthType,
+                        &pConfig->akm_list,
                         &MFPCapable,
                         &MFPRequired,
                         pConfig->RSNWPAReqIE[1]+2,
@@ -11436,9 +11445,11 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
             pConfig->mcRSNEncryptType = mcRSNEncryptType;
             (WLAN_HDD_GET_AP_CTX_PTR(pHostapdAdapter))->ucEncryptType
                                                               = RSNEncryptType;
-            hddLog( LOG1, FL("CSR AuthType = %d, "
-                        "EncryptionType = %d mcEncryptionType = %d"),
-                        RSNAuthType, RSNEncryptType, mcRSNEncryptType);
+            hddLog( LOG1, FL("CSR EncryptionType = %d mcEncryptionType = %d"),
+                    RSNEncryptType, mcRSNEncryptType);
+            for (ii = 0; ii < pConfig->akm_list.numEntries; ii++)
+                    hddLog(LOG1, FL("CSR AKM Suite [%d] = %d"), ii,
+                        pConfig->akm_list.authType[ii]);
         }
     }
 
@@ -11474,7 +11485,7 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
                           vos_get_context( VOS_MODULE_ID_SME, pVosContext),
                           &RSNEncryptType,
                           &mcRSNEncryptType,
-                          &RSNAuthType,
+                          &pConfig->akm_list,
                           &MFPCapable,
                           &MFPRequired,
                           pConfig->RSNWPAReqIE[1]+2,
@@ -11489,9 +11500,11 @@ static int wlan_hdd_cfg80211_start_bss(hdd_adapter_t *pHostapdAdapter,
                 pConfig->mcRSNEncryptType = mcRSNEncryptType;
                 (WLAN_HDD_GET_AP_CTX_PTR(pHostapdAdapter))->ucEncryptType
                                                               = RSNEncryptType;
-                hddLog( LOG1, FL("CSR AuthType = %d, "
-                                "EncryptionType = %d mcEncryptionType = %d"),
-                                RSNAuthType, RSNEncryptType, mcRSNEncryptType);
+                hddLog(LOG1, FL("CSR EncryptionType= %d mcEncryptionType= %d"),
+                       RSNEncryptType, mcRSNEncryptType);
+                for (ii = 0; ii < pConfig->akm_list.numEntries; ii++)
+                        hddLog(LOG1, FL("CSR AKM Suite [%d] = %d"), ii,
+                            pConfig->akm_list.authType[ii]);
             }
         }
     }
@@ -12026,6 +12039,8 @@ static int __wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
     hdd_context_t  *pHddCtx    = NULL;
     hdd_scaninfo_t *pScanInfo  = NULL;
     VOS_STATUS status;
+    eHalStatus      halstatus;
+    tHalHandle      hal_ptr    = WLAN_HDD_GET_HAL_CTX(pAdapter);
     long ret;
 
     ENTER();
@@ -12063,6 +12078,14 @@ static int __wlan_hdd_cfg80211_stop_ap (struct wiphy *wiphy,
         hddLog(LOG1, FL("disconnecting sta with session id: %d"),
                staAdapter->sessionId);
         wlan_hdd_disconnect(staAdapter, eCSR_DISCONNECT_REASON_DEAUTH);
+    }
+
+    if (WLAN_HDD_SOFTAP == pAdapter->device_mode) {
+        halstatus = sme_RoamDelPMKIDfromCache(
+                        hal_ptr, pAdapter->sessionId,
+                        NULL, true);
+        if (!HAL_STATUS_SUCCESS(halstatus))
+            hddLog(LOG1, FL("Cannot flush PMKIDCache"));
     }
 
     ret = wlan_hdd_scan_abort(pAdapter);
@@ -12299,6 +12322,7 @@ static int __wlan_hdd_cfg80211_start_ap(struct wiphy *wiphy,
                                              params->auth_type);
     }
 
+    wlan_hdd_cfg80211_register_frames(pAdapter);
     EXIT();
     return status;
 }
@@ -12476,6 +12500,7 @@ int __wlan_hdd_cfg80211_change_iface( struct wiphy *wiphy,
     eMib_dot11DesiredBssType connectedBssType;
     VOS_STATUS status;
     long ret;
+    bool iff_up = ndev->flags & IFF_UP;
 
     ENTER();
 
@@ -12748,13 +12773,21 @@ int __wlan_hdd_cfg80211_change_iface( struct wiphy *wiphy,
                          return -EINVAL;
                     }
                 }
-                status = hdd_init_ap_mode(pAdapter, false);
-                if(status != VOS_STATUS_SUCCESS)
-                {
-                    hddLog(VOS_TRACE_LEVEL_FATAL,
-                           "%s: Error initializing the ap mode", __func__);
-                    return -EINVAL;
-                }
+		if (iff_up) {
+			hddLog(VOS_TRACE_LEVEL_DEBUG,
+			       "%s: SAP interface is already up", __func__);
+			status = hdd_init_ap_mode(pAdapter, false);
+			if(status != VOS_STATUS_SUCCESS)
+			{
+				hddLog(VOS_TRACE_LEVEL_FATAL,
+				       "%s: Error initializing the ap mode",
+				       __func__);
+				return -EINVAL;
+			}
+		} else {
+			hddLog(VOS_TRACE_LEVEL_DEBUG,
+			       "%s: SAP interface is down", __func__);
+		}
                 hdd_set_conparam(1);
 
                 status = hdd_sta_id_hash_attach(pAdapter);
@@ -12840,9 +12873,16 @@ int __wlan_hdd_cfg80211_change_iface( struct wiphy *wiphy,
 #ifdef FEATURE_WLAN_TDLS
                 mutex_unlock(&pHddCtx->tdls_lock);
 #endif
-                status = hdd_init_station_mode( pAdapter );
-                if( VOS_STATUS_SUCCESS != status )
-                    return -EOPNOTSUPP;
+		if (iff_up) {
+			hddLog(VOS_TRACE_LEVEL_DEBUG,
+			       "%s: STA interface is already up", __func__);
+			status = hdd_init_station_mode( pAdapter );
+			if( VOS_STATUS_SUCCESS != status )
+				return -EOPNOTSUPP;
+		} else {
+			hddLog(VOS_TRACE_LEVEL_DEBUG,
+			       "%s: STA interface is down", __func__);
+		}
                 /* In case of JB, for P2P-GO, only change interface will be called,
                  * This is the right place to enable back bmps_imps()
                  */
@@ -15773,6 +15813,19 @@ int __wlan_hdd_cfg80211_scan( struct wiphy *wiphy,
     }
     mutex_unlock(&pHddCtx->tmInfo.tmOperationLock);
 
+    /**
+     * If sw pta is enabled, scan should not allowed.
+     * Returning error makes framework to trigger scan continuously
+     * for every second, so indicating framework that scan is aborted
+     * and return success.
+     */
+    if (hdd_is_sw_pta_enabled(pHddCtx) && pHddCtx->is_sco_enabled) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+                  FL("BT SCO operation in progress"));
+        hdd_cfg80211_scan_done(pAdapter, request, true);
+        return 0;
+    }
+
     /* Check if scan is allowed at this point of time.
      */
     if (TRUE == pHddCtx->btCoexModeSet)
@@ -16291,6 +16344,14 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
         return -EINVAL;
     }
 
+    /**
+     * If sw pta is enabled, new connections should not allowed.
+     */
+    if (hdd_is_sw_pta_enabled(pHddCtx) && pHddCtx->is_sco_enabled) {
+        hddLog(VOS_TRACE_LEVEL_ERROR, "%s: BT SCO operation in progress",
+               __func__);
+        return -EINVAL;
+    }
 
     pRoamProfile = &pWextState->roamProfile;
 
@@ -19833,6 +19894,45 @@ static int wlan_hdd_cfg80211_flush_pmksa(struct wiphy *wiphy, struct net_device 
 
 #if defined(WLAN_FEATURE_SAE) && \
          defined(CFG80211_EXTERNAL_AUTH_SUPPORT)
+#if defined(CFG80211_EXTERNAL_AUTH_AP_SUPPORT)
+/**
+ * wlan_hdd_extauth_cache_pmkid() - Extract and cache pmkid
+ * @adapter: hdd vdev/net_device context
+ * @hHal: Handle to the hal
+ * @params: Pointer to external auth params.
+ *
+ * Extract the PMKID and BSS from external auth params and add to the
+ * PMKSA Cache in CSR.
+ */
+static void
+wlan_hdd_extauth_cache_pmkid(hdd_adapter_t *adapter,
+                            tHalHandle hHal,
+                            struct cfg80211_external_auth_params *params)
+{
+    tPmkidCacheInfo pmk_cache;
+    VOS_STATUS result;
+
+    if (params->pmkid) {
+            vos_mem_zero(&pmk_cache, sizeof(pmk_cache));
+            vos_mem_copy(pmk_cache.BSSID, params->bssid,
+                        VOS_MAC_ADDR_SIZE);
+            vos_mem_copy(pmk_cache.PMKID, params->pmkid,
+                        CSR_RSN_PMKID_SIZE);
+            result = sme_RoamSetPMKIDCache(hHal, adapter->sessionId,
+                                        &pmk_cache, 1, false);
+            if (!VOS_IS_STATUS_SUCCESS(result))
+                    hddLog(VOS_TRACE_LEVEL_ERROR,
+                            FL("external_auth: Failed to cache PMKID"));
+    }
+}
+#else
+static void
+wlan_hdd_extauth_cache_pmkid(hdd_adapter_t *adapter,
+                            tHalHandle hHal,
+                            struct cfg80211_external_auth_params *params)
+{}
+#endif
+
 /**
  * __wlan_hdd_cfg80211_external_auth() - Handle external auth
  * @wiphy: Pointer to wireless phy
@@ -19840,30 +19940,42 @@ static int wlan_hdd_cfg80211_flush_pmksa(struct wiphy *wiphy, struct net_device 
  * @params: Pointer to external auth params
  *
  * Return: 0 on success, negative errno on failure
+ *
+ * Userspace sends status of the external authentication(e.g., SAE) with a peer.
+ * The message carries BSSID of the peer and auth status (WLAN_STATUS_SUCCESS/
+ * WLAN_STATUS_UNSPECIFIED_FAILURE) in params.
+ * Userspace may send PMKID in params, which can be used for
+ * further connections.
  */
 static int
 __wlan_hdd_cfg80211_external_auth(struct wiphy *wiphy, struct net_device *dev,
                                   struct cfg80211_external_auth_params *params)
 {
-   hdd_context_t *hdd_ctx = wiphy_priv(wiphy);
-   hdd_adapter_t *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
-   int ret;
+    hdd_context_t *hdd_ctx = wiphy_priv(wiphy);
+    hdd_adapter_t *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
+    int ret;
+    tSirMacAddr peer_mac_addr;
 
-   if (hdd_get_conparam() == VOS_FTM_MODE) {
-       hddLog(VOS_TRACE_LEVEL_ERROR, FL("Command not allowed in FTM mode"));
-       return -EPERM;
-   }
+    if (hdd_get_conparam() == VOS_FTM_MODE) {
+        hddLog(VOS_TRACE_LEVEL_ERROR, FL("Command not allowed in FTM mode"));
+        return -EPERM;
+    }
 
-   ret = wlan_hdd_validate_context(hdd_ctx);
-   if (ret)
-       return ret;
+    ret = wlan_hdd_validate_context(hdd_ctx);
+    if (ret)
+        return ret;
 
-   hddLog(VOS_TRACE_LEVEL_DEBUG, FL("external_auth status: %d"),
-          params->status);
+    hddLog(VOS_TRACE_LEVEL_DEBUG,
+            FL("external_auth status: %d peer mac: " MAC_ADDRESS_STR),
+            params->status, MAC_ADDR_ARRAY(params->bssid));
+    vos_mem_copy(peer_mac_addr, params->bssid, VOS_MAC_ADDR_SIZE);
 
-   sme_handle_sae_msg(hdd_ctx->hHal, adapter->sessionId, params->status);
+    wlan_hdd_extauth_cache_pmkid(adapter, hdd_ctx->hHal, params);
 
-   return ret;
+    sme_handle_sae_msg(hdd_ctx->hHal, adapter->sessionId, params->status,
+                        peer_mac_addr);
+
+    return ret;
 }
 
 /**
@@ -19994,6 +20106,15 @@ void hdd_cfg80211_sched_scan_done_callback(void *callbackContext,
         return ;
     }
     spin_unlock(&pHddCtx->schedScan_lock);
+
+    /**
+     * If sw pta is enabled, scan results should not send to framework.
+     */
+    if (hdd_is_sw_pta_enabled(pHddCtx) && pHddCtx->is_sco_enabled) {
+        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
+                  FL("BT SCO operation in progress"));
+        return;
+    }
 
     ret = wlan_hdd_cfg80211_update_bss(pHddCtx->wiphy, pAdapter);
 

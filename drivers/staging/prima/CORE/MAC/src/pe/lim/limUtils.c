@@ -7032,8 +7032,13 @@ limRestorePreChannelSwitchState(tpAniSirGlobal pMac, tpPESession psessionEntry)
     /* Channel switch should be ready for the next time */
     psessionEntry->gLimSpecMgmt.dot11hChanSwState = eLIM_11H_CHANSW_INIT;
 
-    /* Restore the frame transmission, all the time. */
-    limFrameTransmissionControl(pMac, eLIM_TX_ALL, eLIM_RESUME_TX);
+    /* Restore the frame transmission, if switched channel is NON-DFS.
+     * Else tx should be resumed after receiving first beacon on DFS channel
+     */
+    if(!limIsconnectedOnDFSChannel(psessionEntry->currentOperChannel))
+        limFrameTransmissionControl(pMac, eLIM_TX_ALL, eLIM_RESUME_TX);
+    else
+        psessionEntry->gLimSpecMgmt.dfs_channel_csa = true;
 
     /* Free to enter BMPS */
     limSendSmePostChannelSwitchInd(pMac);
@@ -7196,6 +7201,19 @@ limPrepareFor11hChannelSwitch(tpAniSirGlobal pMac, tpPESession psessionEntry)
     else
     {
         PELOGE(limLog(pMac, LOGE, FL("Not in scan state, start channel switch timer"));)
+
+        /* Stop roam scan during CAC period in DFS channels */
+        if(limIsconnectedOnDFSChannel(
+                            psessionEntry->gLimChannelSwitch.primaryChannel)) {
+#ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
+            if (pMac->roam.configParam.isRoamOffloadScanEnabled) {
+               csrRoamOffloadScan(pMac, ROAM_SCAN_OFFLOAD_STOP,
+                                  REASON_DISCONNECTED);
+            }
+#endif
+        psessionEntry->gLimSpecMgmt.dfs_channel_csa = true;
+        }
+
         /** We are safe to switch channel at this point */
         limStopTxAndSwitchChannel(pMac, psessionEntry->peSessionId);
     }
